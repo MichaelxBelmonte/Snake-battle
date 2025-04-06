@@ -7,14 +7,14 @@ class Game {
             food: {}
         };
         
-        // URL base per le API
-        this.apiUrl = 'https://snake-battle.vercel.app/api';
+        // URL base per le API - usa l'URL corrente
+        this.apiUrl = window.location.origin;
         
         // Inizializza Pusher
         try {
             this.pusher = new Pusher('e8c4c5037257e24d1134', {
                 cluster: 'eu',
-                encrypted: true
+                forceTLS: true
             });
             
             this.channel = this.pusher.subscribe('game-channel');
@@ -70,26 +70,37 @@ class Game {
         }
         
         try {
-            const response = await fetch(`${this.apiUrl}/join`, {
+            console.log('Tentativo di join al gioco...');
+            const response = await fetch(`${this.apiUrl}/api/join`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
                 },
                 body: JSON.stringify({ name, color })
             });
             
+            console.log('Risposta ricevuta:', response.status);
+            
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                const errorData = await response.text();
+                console.error('Errore dal server:', errorData);
+                throw new Error(`Errore HTTP: ${response.status}`);
             }
             
             const data = await response.json();
+            console.log('Dati ricevuti:', data);
+            
             if (data.id) {
                 this.playerId = data.id;
                 document.getElementById('nameInput').style.display = 'none';
                 document.getElementById('leaderboard').style.display = 'block';
+                console.log('Join completato con successo');
+            } else {
+                throw new Error('ID giocatore non ricevuto');
             }
         } catch (error) {
-            console.error('Errore durante il join:', error);
+            console.error('Errore dettagliato durante il join:', error);
             alert('Errore durante il join. Riprova.');
         }
     }
@@ -123,10 +134,12 @@ class Game {
         
         if (direction) {
             try {
-                const response = await fetch(`${this.apiUrl}/move`, {
+                console.log('Invio movimento:', direction);
+                const response = await fetch(`${this.apiUrl}/api/move`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
                     },
                     body: JSON.stringify({
                         playerId: this.playerId,
@@ -135,10 +148,14 @@ class Game {
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorData = await response.text();
+                    console.error('Errore dal server:', errorData);
+                    throw new Error(`Errore HTTP: ${response.status}`);
                 }
+                
+                console.log('Movimento inviato con successo');
             } catch (error) {
-                console.error('Errore durante il movimento:', error);
+                console.error('Errore dettagliato durante il movimento:', error);
             }
         }
     }
