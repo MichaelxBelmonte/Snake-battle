@@ -3,36 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi Snake Battle</title>
-    <link rel="stylesheet" href="/css/style.css">
+    <title>Snake Battle</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #1a1a1a;
+            font-family: Arial, sans-serif;
+        }
+        
+        #gameCanvas {
+            border: 2px solid #333;
+            background-color: #000;
+            margin: 20px;
+        }
+        
+        #nameInput, #leaderboard, #gameOver {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+        }
+        
+        #nameInput {
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        
+        #leaderboard {
+            top: 20px;
+            right: 20px;
+        }
+        
+        #gameOver {
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        input {
+            padding: 10px;
+            margin: 10px;
+            border-radius: 5px;
+            border: 1px solid #333;
+        }
+    </style>
 </head>
 <body>
-    <div id="gameContainer">
-        <canvas id="gameCanvas"></canvas>
-        
-        <div id="uiOverlay">
-            <div id="nameInput" class="overlay-panel">
-                <h2>Inserisci il tuo nome</h2>
-                <input type="text" id="playerName" placeholder="Nome giocatore">
-                <input type="color" id="playerColor" value="#ff0000">
-                <button id="startButton">Inizia Partita</button>
-            </div>
-            
-            <div id="leaderboard" class="overlay-panel" style="display: none;">
-                <h2>Classifica</h2>
-                <div id="playerList"></div>
-            </div>
-            
-            <div id="gameOver" class="overlay-panel" style="display: none;">
-                <h2>Game Over!</h2>
-                <p>Punteggio: <span id="finalScore">0</span></p>
-                <button id="restartButton">Rigioca</button>
-            </div>
-        </div>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="nameInput">
+        <h2>Inserisci il tuo nome</h2>
+        <input type="text" id="playerName" placeholder="Nome giocatore">
+        <input type="color" id="playerColor" value="#ff0000">
+        <button id="startButton">Inizia Partita</button>
     </div>
-
-    <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
-    <script src="/js/core.js"></script>
-    <script src="/js/game.js"></script>
+    
+    <div id="leaderboard" style="display: none;">
+        <h2>Classifica</h2>
+        <div id="playerList"></div>
+    </div>
+    
+    <div id="gameOver">
+        <h2>Game Over!</h2>
+        <p>Punteggio: <span id="finalScore">0</span></p>
+        <button id="restartButton">Rigioca</button>
+    </div>
+    
+    <script src="js/core.js"></script>
+    <script src="js/game.js"></script>
 </body>
 </html> 

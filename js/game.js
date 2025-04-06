@@ -8,30 +8,51 @@ class Game {
         };
         
         // Inizializza Pusher
-        this.pusher = new Pusher('e8c4c5037257e24d1134', {
-            cluster: 'eu'
-        });
-        
-        this.channel = this.pusher.subscribe('game-channel');
-        this.setupEventListeners();
+        try {
+            this.pusher = new Pusher('e8c4c5037257e24d1134', {
+                cluster: 'eu',
+                encrypted: true
+            });
+            
+            this.channel = this.pusher.subscribe('game-channel');
+            this.setupEventListeners();
+            console.log('Pusher inizializzato con successo');
+        } catch (error) {
+            console.error('Errore durante l\'inizializzazione di Pusher:', error);
+            alert('Errore di connessione al server. Riprova più tardi.');
+        }
     }
     
     setupEventListeners() {
         // Eventi UI
-        document.getElementById('startButton').addEventListener('click', () => this.joinGame());
-        document.getElementById('restartButton').addEventListener('click', () => this.restartGame());
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        
+        if (startButton) {
+            startButton.addEventListener('click', () => this.joinGame());
+        } else {
+            console.error('Pulsante start non trovato!');
+        }
+        
+        if (restartButton) {
+            restartButton.addEventListener('click', () => this.restartGame());
+        } else {
+            console.error('Pulsante restart non trovato!');
+        }
         
         // Eventi tastiera
         document.addEventListener('keydown', (e) => this.handleKeyPress(e));
         
         // Eventi Pusher
-        this.channel.bind('playerJoined', (data) => this.onPlayerJoined(data));
-        this.channel.bind('gameState', (data) => this.onGameStateUpdate(data));
-        this.channel.bind('powerUpSpawned', (data) => this.onPowerUpSpawned(data));
-        this.channel.bind('powerUpCollected', (data) => this.onPowerUpCollected(data));
-        this.channel.bind('foodSpawned', (data) => this.onFoodSpawned(data));
-        this.channel.bind('foodEaten', (data) => this.onFoodEaten(data));
-        this.channel.bind('gameOver', (data) => this.onGameOver(data));
+        if (this.channel) {
+            this.channel.bind('playerJoined', (data) => this.onPlayerJoined(data));
+            this.channel.bind('gameState', (data) => this.onGameStateUpdate(data));
+            this.channel.bind('powerUpSpawned', (data) => this.onPowerUpSpawned(data));
+            this.channel.bind('powerUpCollected', (data) => this.onPowerUpCollected(data));
+            this.channel.bind('foodSpawned', (data) => this.onFoodSpawned(data));
+            this.channel.bind('foodEaten', (data) => this.onFoodEaten(data));
+            this.channel.bind('gameOver', (data) => this.onGameOver(data));
+        }
     }
     
     async joinGame() {
@@ -175,27 +196,42 @@ class Game {
     }
     
     render() {
-        window.gameCore.clear();
-        window.gameCore.drawGrid();
+        if (!window.gameCore) {
+            console.error('GameCore non inizializzato!');
+            return;
+        }
         
-        // Disegna il cibo
-        Object.values(this.gameState.food).forEach(food => {
-            window.gameCore.drawFood(food);
-        });
-        
-        // Disegna i power-up
-        Object.values(this.gameState.powerUps).forEach(powerUp => {
-            window.gameCore.drawPowerUp(powerUp);
-        });
-        
-        // Disegna i serpenti
-        Object.values(this.gameState.players).forEach(player => {
-            window.gameCore.drawSnake(player);
-        });
+        try {
+            window.gameCore.clear();
+            window.gameCore.drawGrid();
+            
+            // Disegna il cibo
+            Object.values(this.gameState.food).forEach(food => {
+                window.gameCore.drawFood(food);
+            });
+            
+            // Disegna i power-up
+            Object.values(this.gameState.powerUps).forEach(powerUp => {
+                window.gameCore.drawPowerUp(powerUp);
+            });
+            
+            // Disegna i serpenti
+            Object.values(this.gameState.players).forEach(player => {
+                window.gameCore.drawSnake(player);
+            });
+        } catch (error) {
+            console.error('Errore durante il rendering:', error);
+        }
     }
 }
 
 // Inizializza il gioco quando la pagina è caricata
 window.addEventListener('load', () => {
-    window.game = new Game();
+    try {
+        window.game = new Game();
+        console.log('Gioco inizializzato con successo');
+    } catch (error) {
+        console.error('Errore durante l\'inizializzazione del gioco:', error);
+        alert('Errore durante l\'inizializzazione del gioco. Ricarica la pagina.');
+    }
 }); 

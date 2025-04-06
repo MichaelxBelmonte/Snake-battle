@@ -2,18 +2,33 @@ class GameCore {
     constructor() {
         console.log('Inizializzazione GameCore...');
         this.canvas = document.getElementById('gameCanvas');
+        if (!this.canvas) {
+            console.error('Canvas non trovato!');
+            return;
+        }
+        
         this.ctx = this.canvas.getContext('2d');
+        if (!this.ctx) {
+            console.error('Contesto 2D non supportato!');
+            return;
+        }
+        
         this.gridSize = 20;
         this.cellSize = 0;
         
         this.setupCanvas();
         window.addEventListener('resize', () => this.setupCanvas());
+        
+        // Aggiungi un messaggio di debug
+        console.log('GameCore inizializzato con successo');
     }
     
     setupCanvas() {
         console.log('Configurazione canvas...');
-        this.canvas.width = window.innerWidth;
-        this.canvas.height = window.innerHeight;
+        // Imposta dimensioni fisse per il canvas
+        this.canvas.width = 800;
+        this.canvas.height = 600;
+        
         this.cellSize = Math.min(
             this.canvas.width / this.gridSize,
             this.canvas.height / this.gridSize
@@ -21,6 +36,9 @@ class GameCore {
         
         this.clear();
         this.drawGrid();
+        
+        // Aggiungi un messaggio di debug
+        console.log(`Canvas configurato: ${this.canvas.width}x${this.canvas.height}, cellSize: ${this.cellSize}`);
     }
     
     clear() {
