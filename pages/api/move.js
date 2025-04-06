@@ -1,73 +1,112 @@
-const Pusher = require('pusher');
+import Pusher from 'pusher';
 
+// Inizializza Pusher
 const pusher = new Pusher({
-    appId: '1970487',
-    key: 'e8c4c5037257e24d1134',
-    secret: '7ea70124ffd933139ab7',
-    cluster: 'eu',
-    useTLS: true
+  appId: process.env.PUSHER_APP_ID,
+  key: process.env.PUSHER_KEY,
+  secret: process.env.PUSHER_SECRET,
+  cluster: process.env.PUSHER_CLUSTER,
+  useTLS: true
 });
 
-const gameState = {
-    players: {},
-    food: {},
-    powerUps: {}
+// Stato del gioco (in memoria)
+let gameState = {
+  players: [],
+  food: { x: 0, y: 0 }
 };
 
+// Genera una posizione casuale per il cibo
+function generateFood() {
+  const gridSize = 20;
+  const maxX = 30;
+  const maxY = 30;
+  
+  return {
+    x: Math.floor(Math.random() * maxX) * gridSize,
+    y: Math.floor(Math.random() * maxY) * gridSize
+  };
+}
+
+// Aggiorna la posizione del serpente
+function updateSnakePosition(player, direction) {
+  const gridSize = 20;
+  const head = { ...player.snake[0] };
+  
+  // Aggiorna la posizione della testa in base alla direzione
+  switch (direction) {
+    case 'up':
+      head.y -= gridSize;
+      break;
+    case 'down':
+      head.y += gridSize;
+      break;
+    case 'left':
+      head.x -= gridSize;
+      break;
+    case 'right':
+      head.x += gridSize;
+      break;
+    default:
+      return player;
+  }
+  
+  // Crea una nuova testa
+  const newSnake = [head, ...player.snake];
+  
+  // Controlla se il serpente ha mangiato il cibo
+  if (head.x === gameState.food.x && head.y === gameState.food.y) {
+    // Aumenta il punteggio
+    player.score += 10;
+    
+    // Genera nuovo cibo
+    gameState.food = generateFood();
+  } else {
+    // Rimuovi l'ultimo segmento se non ha mangiato
+    newSnake.pop();
+  }
+  
+  // Aggiorna il serpente del giocatore
+  player.snake = newSnake;
+  player.direction = direction;
+  
+  return player;
+}
+
 export default async function handler(req, res) {
-    // Abilita CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Metodo non consentito' });
+  }
 
-    // Gestisci la richiesta OPTIONS per CORS
-    if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
+  try {
+    const { playerId, direction } = req.body;
+    
+    if (!playerId || !direction) {
+      return res.status(400).json({ error: 'ID giocatore e direzione sono richiesti' });
     }
-
-    // Verifica che sia una richiesta POST
-    if (req.method !== 'POST') {
-        res.status(405).json({ error: 'Metodo non permesso' });
-        return;
+    
+    // Trova il giocatore
+    const playerIndex = gameState.players.findIndex(p => p.id === playerId);
+    
+    if (playerIndex === -1) {
+      return res.status(404).json({ error: 'Giocatore non trovato' });
     }
-
-    try {
-        const { playerId, direction } = req.body;
-        
-        if (!playerId || !direction) {
-            res.status(400).json({ error: 'ID giocatore e direzione sono richiesti' });
-            return;
-        }
-
-        const player = gameState.players[playerId];
-        if (!player) {
-            res.status(404).json({ error: 'Giocatore non trovato' });
-            return;
-        }
-
-        // Aggiorna la direzione del serpente
-        player.direction = direction;
-        
-        // Calcola la nuova posizione della testa
-        const head = { ...player.segments[0] };
-        switch (direction) {
-            case 'up': head.y--; break;
-            case 'down': head.y++; break;
-            case 'left': head.x--; break;
-            case 'right': head.x++; break;
-        }
-        
-        // Aggiungi la nuova testa e rimuovi l'ultima parte della coda
-        player.segments.unshift(head);
-        player.segments.pop();
-
-        // Invia lo stato aggiornato a tutti i giocatori
-        await pusher.trigger('game-channel', 'gameState', gameState);
-
-        res.status(200).json({ success: true });
-    } catch (error) {
-        console.error('Errore durante il movimento:', error);
-        res.status(500).json({ error: 'Errore interno del server' });
-    }
+    
+    // Aggiorna la posizione del serpente
+    const updatedPlayer = updateSnakePosition(gameState.players[playerIndex], direction);
+    gameState.players[playerIndex] = updatedPlayer;
+    
+    // Notifica tutti i client del movimento
+    await pusher.trigger('snake-game', 'player-moved', {
+      players: gameState.players,
+      food: gameState.food
+    });
+    
+    return res.status(200).json({
+      players: gameState.players,
+      food: gameState.food
+    });
+  } catch (error) {
+    console.error('Errore durante il movimento:', error);
+    return res.status(500).json({ error: 'Errore del server' });
+  }
 } 

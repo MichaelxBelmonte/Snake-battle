@@ -1,40 +1,34 @@
-const Pusher = require('pusher');
+import Pusher from 'pusher';
 
+// Inizializza Pusher
 const pusher = new Pusher({
-    appId: '1970487',
-    key: 'e8c4c5037257e24d1134',
-    secret: '7ea70124ffd933139ab7',
-    cluster: 'eu',
+    appId: process.env.PUSHER_APP_ID,
+    key: process.env.PUSHER_KEY,
+    secret: process.env.PUSHER_SECRET,
+    cluster: process.env.PUSHER_CLUSTER,
     useTLS: true
 });
 
-const gameState = {
-    players: {},
-    food: {},
-    powerUps: {}
+// Stato del gioco (in memoria)
+let gameState = {
+    players: [],
+    food: { x: 0, y: 0 }
 };
 
-// Genera una posizione casuale sulla griglia
-function getRandomPosition(gridSize = 30) {
+// Genera una posizione casuale per il cibo
+function generateFood() {
+    const gridSize = 20;
+    const maxX = 30;
+    const maxY = 30;
+    
     return {
-        x: Math.floor(Math.random() * gridSize),
-        y: Math.floor(Math.random() * gridSize)
+        x: Math.floor(Math.random() * maxX) * gridSize,
+        y: Math.floor(Math.random() * maxY) * gridSize
     };
 }
 
-// Inizializza un nuovo serpente
-function createSnake(color) {
-    const pos = getRandomPosition();
-    return {
-        segments: [
-            pos,
-            { x: pos.x - 1, y: pos.y },
-            { x: pos.x - 2, y: pos.y }
-        ],
-        direction: 'right',
-        color: color
-    };
-}
+// Inizializza il cibo
+gameState.food = generateFood();
 
 export default async function handler(req, res) {
     // Abilita CORS
@@ -50,7 +44,7 @@ export default async function handler(req, res) {
 
     // Verifica che sia una richiesta POST
     if (req.method !== 'POST') {
-        res.status(405).json({ error: 'Metodo non permesso' });
+        res.status(405).json({ error: 'Metodo non consentito' });
         return;
     }
 
@@ -61,28 +55,42 @@ export default async function handler(req, res) {
             res.status(400).json({ error: 'Nome e colore sono richiesti' });
             return;
         }
-
-        const playerId = Date.now().toString();
-        const player = {
-            id: playerId,
-            name: name,
-            color: color,
-            score: 0,
-            ...createSnake(color)
-        };
-
-        // Aggiungi il giocatore allo stato del gioco
-        gameState.players[playerId] = player;
-
-        // Invia l'evento playerJoined
-        await pusher.trigger('game-channel', 'playerJoined', player);
         
-        // Invia lo stato del gioco aggiornato a tutti
-        await pusher.trigger('game-channel', 'gameState', gameState);
-
-        res.status(200).json({ id: playerId });
+        // Genera una posizione iniziale casuale per il nuovo giocatore
+        const gridSize = 20;
+        const maxX = 30;
+        const maxY = 30;
+        
+        const newPlayer = {
+            id: Date.now().toString(),
+            name,
+            color,
+            snake: [
+                {
+                    x: Math.floor(Math.random() * maxX) * gridSize,
+                    y: Math.floor(Math.random() * maxY) * gridSize
+                }
+            ],
+            direction: 'right',
+            score: 0
+        };
+        
+        // Aggiungi il giocatore allo stato del gioco
+        gameState.players.push(newPlayer);
+        
+        // Notifica tutti i client del nuovo giocatore
+        await pusher.trigger('snake-game', 'player-joined', {
+            players: gameState.players,
+            food: gameState.food
+        });
+        
+        return res.status(200).json({
+            playerId: newPlayer.id,
+            players: gameState.players,
+            food: gameState.food
+        });
     } catch (error) {
         console.error('Errore durante il join:', error);
-        res.status(500).json({ error: 'Errore interno del server' });
+        return res.status(500).json({ error: 'Errore del server' });
     }
 } 
