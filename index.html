@@ -3,52 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Snake Battle</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Multi-Snake Battle</title>
     <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
     <style>
         body {
             margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            background-color: #1a1a1a;
+            padding: 20px;
+            background-color: #0077be;
             font-family: Arial, sans-serif;
+            color: white;
+        }
+        
+        #gameContainer {
+            display: flex;
+            justify-content: space-between;
+            max-width: 1200px;
+            margin: 0 auto;
         }
         
         #gameCanvas {
-            border: 2px solid #333;
-            background-color: #000;
-            margin: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            background-color: #0077be;
         }
         
-        #nameInput, #leaderboard, #gameOver {
-            position: absolute;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 20px;
-            border-radius: 10px;
-            color: white;
-            text-align: center;
+        .score-panel {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-size: 18px;
         }
         
         #nameInput {
+            position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
         }
         
         #leaderboard {
+            position: fixed;
             top: 20px;
             right: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 5px;
+            min-width: 200px;
         }
         
-        #gameOver {
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            display: none;
+        #playerList div {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
         }
         
         button {
@@ -58,6 +71,7 @@
             padding: 10px 20px;
             border-radius: 5px;
             cursor: pointer;
+            font-size: 16px;
             margin: 10px;
         }
         
@@ -70,11 +84,23 @@
             margin: 10px;
             border-radius: 5px;
             border: 1px solid #333;
+            font-size: 16px;
+        }
+        
+        h2 {
+            margin: 0 0 15px 0;
+            color: white;
         }
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas"></canvas>
+    <div id="gameContainer">
+        <div class="score-panel">
+            Punteggio: <span id="score">0</span>
+        </div>
+        
+        <canvas id="gameCanvas"></canvas>
+    </div>
     
     <div id="nameInput">
         <h2>Inserisci il tuo nome</h2>
@@ -88,7 +114,7 @@
         <div id="playerList"></div>
     </div>
     
-    <div id="gameOver">
+    <div id="gameOver" style="display: none;">
         <h2>Game Over!</h2>
         <p>Punteggio: <span id="finalScore">0</span></p>
         <button id="restartButton">Rigioca</button>

@@ -2,14 +2,15 @@ const express = require('express');
 const Pusher = require('pusher');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const path = require('path');
 
 // Configurazione Pusher
 const pusher = new Pusher({
-    appId: process.env.PUSHER_APP_ID || '1970487',
-    key: process.env.PUSHER_KEY || 'e8c4c5037257e24d1134',
-    secret: process.env.PUSHER_SECRET || '7ea70124ffd933139ab7',
-    cluster: process.env.PUSHER_CLUSTER || 'eu',
-    encrypted: true
+    appId: '1970487',
+    key: 'e8c4c5037257e24d1134',
+    secret: '7ea70124ffd933139ab7',
+    cluster: 'eu',
+    useTLS: true
 });
 
 // Costanti del gioco
@@ -27,10 +28,10 @@ let gameState = {
 };
 
 // Funzioni di utilità
-function getRandomPosition() {
+function getRandomPosition(gridSize = 30) {
     return {
-        x: Math.floor(Math.random() * GRID_SIZE),
-        y: Math.floor(Math.random() * GRID_SIZE)
+        x: Math.floor(Math.random() * gridSize),
+        y: Math.floor(Math.random() * gridSize)
     };
 }
 
@@ -54,13 +55,12 @@ function spawnPowerUp() {
 }
 
 function spawnFood() {
-    const position = getRandomPosition();
+    const foodId = Date.now().toString();
     const food = {
-        id: Date.now().toString(),
-        position,
-        value: Math.floor(Math.random() * 3) + 1
+        id: foodId,
+        position: getRandomPosition()
     };
-    gameState.food[food.id] = food;
+    gameState.food[foodId] = food;
     pusher.trigger('game-channel', 'foodSpawned', food);
 }
 
@@ -168,6 +168,7 @@ class Snake {
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, '..')));
 
 // Middleware per gestire gli errori
 app.use((err, req, res, next) => {
@@ -195,47 +196,72 @@ app.post('/pusher/auth', (req, res) => {
 
 // Route per il join del giocatore
 app.post('/join', (req, res) => {
-    try {
-        const { name, color } = req.body;
-        
-        if (!name || !color) {
-            return res.status(400).json({ error: 'Nome e colore sono richiesti' });
-        }
-        
-        const id = Date.now().toString();
-        const position = getRandomPosition();
-        
-        const snake = new Snake(id, name, color, position);
-        gameState.players[id] = snake;
-        
-        pusher.trigger('game-channel', 'playerJoined', snake);
-        res.json({ id });
-    } catch (error) {
-        console.error('Errore durante il join:', error);
-        res.status(500).json({ error: 'Errore durante il join' });
+    const { name, color } = req.body;
+    const playerId = Date.now().toString();
+    
+    const player = {
+        id: playerId,
+        name: name,
+        color: color,
+        score: 0,
+        ...createSnake(color)
+    };
+    
+    gameState.players[playerId] = player;
+    
+    // Invia l'evento playerJoined
+    pusher.trigger('game-channel', 'playerJoined', player);
+    
+    // Invia lo stato del gioco aggiornato a tutti
+    pusher.trigger('game-channel', 'gameState', gameState);
+    
+    // Se non c'è cibo, ne genera uno
+    if (Object.keys(gameState.food).length === 0) {
+        spawnFood();
     }
+    
+    res.json({ id: playerId });
 });
 
 // Route per il movimento del serpente
 app.post('/move', (req, res) => {
-    try {
-        const { playerId, direction } = req.body;
+    const { playerId, direction } = req.body;
+    const player = gameState.players[playerId];
+    
+    if (player) {
+        // Aggiorna la direzione del serpente
+        player.direction = direction;
         
-        if (!playerId || !direction) {
-            return res.status(400).json({ error: 'ID giocatore e direzione sono richiesti' });
+        // Calcola la nuova posizione della testa
+        const head = { ...player.segments[0] };
+        switch (direction) {
+            case 'up': head.y--; break;
+            case 'down': head.y++; break;
+            case 'left': head.x--; break;
+            case 'right': head.x++; break;
         }
         
-        const snake = gameState.players[playerId];
-        if (!snake) {
-            return res.status(404).json({ error: 'Giocatore non trovato' });
-        }
+        // Aggiungi la nuova testa e rimuovi l'ultima parte della coda
+        player.segments.unshift(head);
+        player.segments.pop();
         
-        snake.nextDirection = direction;
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Errore durante il movimento:', error);
-        res.status(500).json({ error: 'Errore durante il movimento' });
+        // Controlla collisioni con il cibo
+        Object.entries(gameState.food).forEach(([foodId, food]) => {
+            if (head.x === food.position.x && head.y === food.position.y) {
+                // Mangia il cibo
+                delete gameState.food[foodId];
+                player.score += 10;
+                player.segments.push({ ...player.segments[player.segments.length - 1] });
+                pusher.trigger('game-channel', 'foodEaten', foodId);
+                spawnFood();
+            }
+        });
+        
+        // Invia lo stato aggiornato
+        pusher.trigger('game-channel', 'gameState', gameState);
     }
+    
+    res.json({ success: true });
 });
 
 // Route per ottenere lo stato del gioco

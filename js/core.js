@@ -13,19 +13,17 @@ class GameCore {
             return;
         }
         
-        this.gridSize = 20;
+        this.gridSize = 30;
         this.cellSize = 0;
         
         this.setupCanvas();
         window.addEventListener('resize', () => this.setupCanvas());
         
-        // Aggiungi un messaggio di debug
         console.log('GameCore inizializzato con successo');
     }
     
     setupCanvas() {
         console.log('Configurazione canvas...');
-        // Imposta dimensioni fisse per il canvas
         this.canvas.width = 800;
         this.canvas.height = 600;
         
@@ -37,12 +35,11 @@ class GameCore {
         this.clear();
         this.drawGrid();
         
-        // Aggiungi un messaggio di debug
         console.log(`Canvas configurato: ${this.canvas.width}x${this.canvas.height}, cellSize: ${this.cellSize}`);
     }
     
     clear() {
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.fillStyle = '#0077be';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
     
@@ -50,17 +47,15 @@ class GameCore {
         const offsetX = (this.canvas.width - this.cellSize * this.gridSize) / 2;
         const offsetY = (this.canvas.height - this.cellSize * this.gridSize) / 2;
         
-        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        this.ctx.lineWidth = 1;
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        this.ctx.lineWidth = 0.5;
         
         for (let i = 0; i <= this.gridSize; i++) {
-            // Linee verticali
             this.ctx.beginPath();
             this.ctx.moveTo(offsetX + i * this.cellSize, offsetY);
             this.ctx.lineTo(offsetX + i * this.cellSize, offsetY + this.gridSize * this.cellSize);
             this.ctx.stroke();
             
-            // Linee orizzontali
             this.ctx.beginPath();
             this.ctx.moveTo(offsetX, offsetY + i * this.cellSize);
             this.ctx.lineTo(offsetX + this.gridSize * this.cellSize, offsetY + i * this.cellSize);
@@ -72,9 +67,9 @@ class GameCore {
         const offsetX = (this.canvas.width - this.cellSize * this.gridSize) / 2;
         const offsetY = (this.canvas.height - this.cellSize * this.gridSize) / 2;
         
-        // Disegna il corpo
-        this.ctx.fillStyle = snake.color;
         snake.segments.forEach((segment, index) => {
+            this.ctx.fillStyle = snake.color;
+            
             this.ctx.fillRect(
                 offsetX + segment.x * this.cellSize,
                 offsetY + segment.y * this.cellSize,
@@ -82,16 +77,18 @@ class GameCore {
                 this.cellSize
             );
             
-            // Aggiungi effetto gradiente per la testa
             if (index === 0) {
-                this.ctx.fillStyle = this.lightenColor(snake.color, 20);
-                this.ctx.fillRect(
-                    offsetX + segment.x * this.cellSize + this.cellSize * 0.1,
-                    offsetY + segment.y * this.cellSize + this.cellSize * 0.1,
-                    this.cellSize * 0.8,
-                    this.cellSize * 0.8
-                );
+                this.ctx.fillStyle = this.lightenColor(snake.color, 30);
+            } else {
+                this.ctx.fillStyle = this.lightenColor(snake.color, 10);
             }
+            
+            this.ctx.fillRect(
+                offsetX + segment.x * this.cellSize + 2,
+                offsetY + segment.y * this.cellSize + 2,
+                this.cellSize - 4,
+                this.cellSize - 4
+            );
         });
     }
     
@@ -100,15 +97,12 @@ class GameCore {
         const offsetY = (this.canvas.height - this.cellSize * this.gridSize) / 2;
         
         this.ctx.fillStyle = '#ffff00';
-        this.ctx.beginPath();
-        this.ctx.arc(
-            offsetX + (food.position.x + 0.5) * this.cellSize,
-            offsetY + (food.position.y + 0.5) * this.cellSize,
-            this.cellSize * 0.4,
-            0,
-            Math.PI * 2
+        this.ctx.fillRect(
+            offsetX + food.position.x * this.cellSize,
+            offsetY + food.position.y * this.cellSize,
+            this.cellSize,
+            this.cellSize
         );
-        this.ctx.fill();
     }
     
     drawPowerUp(powerUp) {
@@ -118,7 +112,6 @@ class GameCore {
         const color = powerUp.type === 'speed' ? '#00ff00' : '#ff00ff';
         this.ctx.fillStyle = color;
         
-        // Disegna una stella
         const centerX = offsetX + (powerUp.position.x + 0.5) * this.cellSize;
         const centerY = offsetY + (powerUp.position.y + 0.5) * this.cellSize;
         const size = this.cellSize * 0.4;
@@ -150,5 +143,4 @@ class GameCore {
     }
 }
 
-// Esporta l'istanza del core
 window.gameCore = new GameCore(); 
