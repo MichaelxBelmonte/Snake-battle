@@ -1,0 +1,23 @@
+{
+  "name": "multi-snake-battle",
+  "version": "1.0.0",
+  "description": "Gioco multiplayer Snake con Pusher e Vercel",
+  "main": "api/pusher-server.js",
+  "scripts": {
+    "start": "node api/pusher-server.js",
+    "dev": "nodemon api/pusher-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pusher": "^5.1.3",
+    "pusher-js": "^8.2.0",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+} 

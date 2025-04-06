@@ -1,0 +1,61 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/pusher-server.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "js/**",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "css/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/pusher/auth",
+      "dest": "api/pusher-server.js"
+    },
+    {
+      "src": "/join",
+      "dest": "api/pusher-server.js"
+    },
+    {
+      "src": "/move",
+      "dest": "api/pusher-server.js"
+    },
+    {
+      "src": "/gameState",
+      "dest": "api/pusher-server.js"
+    },
+    {
+      "src": "/health",
+      "dest": "api/pusher-server.js"
+    },
+    {
+      "src": "/js/(.*)",
+      "dest": "/js/$1",
+      "headers": {
+        "cache-control": "public, max-age=0, must-revalidate"
+      }
+    },
+    {
+      "src": "/css/(.*)",
+      "dest": "/css/$1",
+      "headers": {
+        "cache-control": "public, max-age=0, must-revalidate"
+      }
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
+} 
