@@ -7,6 +7,9 @@ class Game {
             food: {}
         };
         
+        // URL base per le API
+        this.apiUrl = 'https://snake-battle.vercel.app/api';
+        
         // Inizializza Pusher
         try {
             this.pusher = new Pusher('e8c4c5037257e24d1134', {
@@ -67,13 +70,17 @@ class Game {
         }
         
         try {
-            const response = await fetch('/join', {
+            const response = await fetch(`${this.apiUrl}/join`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ name, color })
             });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
             
             const data = await response.json();
             if (data.id) {
@@ -116,7 +123,7 @@ class Game {
         
         if (direction) {
             try {
-                await fetch('/move', {
+                const response = await fetch(`${this.apiUrl}/move`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -126,6 +133,10 @@ class Game {
                         direction
                     })
                 });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
             } catch (error) {
                 console.error('Errore durante il movimento:', error);
             }
