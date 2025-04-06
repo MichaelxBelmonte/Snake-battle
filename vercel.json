@@ -1,23 +1,7 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "pages/api/*.js", "use": "@vercel/node" },
-    { "src": "*.html", "use": "@vercel/static" },
-    { "src": "js/*.js", "use": "@vercel/static" },
-    { "src": "css/*.css", "use": "@vercel/static" }
-  ],
-  "routes": [
-    {
-      "src": "/api/join",
-      "dest": "/pages/api/join.js"
-    },
-    {
-      "src": "/api/move",
-      "dest": "/pages/api/move.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
-    }
-  ]
+  "buildCommand": "next build",
+  "devCommand": "next dev",
+  "outputDirectory": ".next",
+  "framework": "nextjs"
 } 
