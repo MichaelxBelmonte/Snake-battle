@@ -9,6 +9,11 @@ const pusher = new Pusher({
     useTLS: true
 });
 
+// Funzione per ottenere l'istanza di Pusher
+const getPusherInstance = () => {
+    return pusher;
+};
+
 // Genera una posizione casuale sulla griglia
 const generateRandomPosition = (excludePositions = []) => {
     const gridSize = 20;

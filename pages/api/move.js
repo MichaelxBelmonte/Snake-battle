@@ -9,6 +9,11 @@ const pusher = new Pusher({
   useTLS: true
 });
 
+// Funzione per ottenere l'istanza di Pusher
+const getPusherInstance = () => {
+  return pusher;
+};
+
 // Controlla se c'è una collisione con altri serpenti
 const checkCollision = (head, players, currentPlayerId) => {
   for (const player of players) {
