@@ -72,12 +72,213 @@ export default function Home() {
     setIsMobile(isMobileDevice());
   }, []);
   
+  // Risolve problema sfarfallio: usa requestAnimationFrame invece di setInterval
+  useEffect(() => {
+    if (!gameStarted || !playerId || !playerState) return;
+
+    console.log('Avvio loop di gioco con requestAnimationFrame');
+    
+    // Preparazione del canvas
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.width = 800;
+      canvas.height = 600;
+    }
+    
+    // Riferimenti alle funzioni di rendering e update
+    let movementTimestamp = 0;
+    let serverUpdateTimestamp = 0;
+    
+    // Funzione principale di game loop
+    const gameLoop = (timestamp) => {
+      // Aggiorna logica di movimento (10 FPS - ogni 100ms)
+      if (timestamp - movementTimestamp > 100) {
+        updateLocalMovement();
+        movementTimestamp = timestamp;
+      }
+      
+      // Aggiorna con il server (ogni 250ms)
+      if (timestamp - serverUpdateTimestamp > 250) {
+        updateWithServer();
+        serverUpdateTimestamp = timestamp;
+      }
+      
+      // Rendering (60 FPS)
+      renderGame();
+      
+      // Continua il loop
+      renderLoopRef.current = requestAnimationFrame(gameLoop);
+    };
+    
+    // Funzione di rendering
+    const renderGame = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Sfondo
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, '#121212');
+      gradient.addColorStop(1, '#1e3a8a');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Disegna griglia
+      const gridSize = 20;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.lineWidth = 0.5;
+      
+      for (let x = 0; x <= canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      
+      for (let y = 0; y <= canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+      
+      // Disegna il cibo
+      foodItems.forEach(food => {
+        ctx.fillStyle = '#e73c3e'; // Rosso per il cibo
+        ctx.beginPath();
+        ctx.arc(
+          food.x + gridSize/2,
+          food.y + gridSize/2,
+          gridSize/2 - 2,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      });
+      
+      // Debug info su otherPlayers
+      document.getElementById('debug-info').textContent = 
+        `Altri giocatori: ${otherPlayers.length} - IDs: ${otherPlayers.map(p => p.id).join(', ')}`;
+      
+      // Disegna gli altri serpenti
+      if (otherPlayers && otherPlayers.length > 0) {
+        otherPlayers.forEach(player => {
+          if (player && player.snake && player.snake.length > 0) {
+            // Disegna il nome
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(player.name || 'Giocatore', player.snake[0].x + gridSize/2, player.snake[0].y - 5);
+            
+            // Disegna il serpente
+            player.snake.forEach((segment, i) => {
+              ctx.fillStyle = player.color || '#00ff00';
+              ctx.beginPath();
+              ctx.arc(
+                segment.x + gridSize/2,
+                segment.y + gridSize/2,
+                i === 0 ? gridSize/2 : gridSize/2 - 2, // Testa più grande
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+            });
+          }
+        });
+      }
+      
+      // Disegna il proprio serpente
+      if (playerState.snake && playerState.snake.length > 0) {
+        // Disegna il nome
+        ctx.fillStyle = 'white';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(playerName || 'Tu', playerState.snake[0].x + gridSize/2, playerState.snake[0].y - 5);
+        
+        // Disegna il serpente
+        playerState.snake.forEach((segment, i) => {
+          ctx.fillStyle = playerColor;
+          ctx.beginPath();
+          ctx.arc(
+            segment.x + gridSize/2,
+            segment.y + gridSize/2,
+            i === 0 ? gridSize/2 : gridSize/2 - 2, // Testa più grande
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        });
+      }
+      
+      // Disegna stats
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Punteggio: ${score}`, 10, 25);
+      
+      ctx.textAlign = 'right';
+      ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
+    };
+    
+    // Funzione per aggiornare il movimento locale
+    const updateLocalMovement = () => {
+      if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
+      
+      const gridSize = 20;
+      const head = { ...playerState.snake[0] };
+      const canvasWidth = 800;
+      const canvasHeight = 600;
+      
+      // Movimento locale basato sulla direzione
+      switch (directionRef.current) {
+        case 'up':
+          head.y -= gridSize;
+          if (head.y < 0) head.y = canvasHeight - gridSize;
+          break;
+        case 'down':
+          head.y += gridSize;
+          if (head.y >= canvasHeight) head.y = 0;
+          break;
+        case 'left':
+          head.x -= gridSize;
+          if (head.x < 0) head.x = canvasWidth - gridSize;
+          break;
+        case 'right':
+          head.x += gridSize;
+          if (head.x >= canvasWidth) head.x = 0;
+          break;
+      }
+      
+      // Aggiorna la posizione localmente
+      setPlayerState(prev => ({
+        ...prev,
+        snake: [head, ...prev.snake.slice(0, -1)]
+      }));
+      
+      lastDirectionRef.current = directionRef.current;
+    };
+    
+    // Avvia il game loop
+    renderLoopRef.current = requestAnimationFrame(gameLoop);
+    
+    // Pulizia
+    return () => {
+      if (renderLoopRef.current) {
+        cancelAnimationFrame(renderLoopRef.current);
+      }
+    };
+  }, [gameStarted, playerId, playerState, foodItems, otherPlayers, score]);
+  
   // Inizializza Pusher e sottoscrizione agli eventi
   useEffect(() => {
     if (!gameStarted || !playerId) return;
     
-    // Debug (minimizzato)
-    console.log('Inizializzazione Pusher:', playerId);
+    console.log('Inizializzazione Pusher per:', playerId);
+    
+    // Resetta lo stato degli other players
+    setOtherPlayers([]);
     
     // Inizializza Pusher
     const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
@@ -90,8 +291,18 @@ export default function Home() {
     // Gestisci l'evento player-joined
     channel.bind('player-joined', (data) => {
       if (data.player && data.player.id !== playerId) {
-        console.log('Nuovo giocatore:', data.player.id);
-        setOtherPlayers(prev => [...prev, data.player]);
+        console.log('RICEVUTO PLAYER-JOINED:', data.player.id);
+        
+        // Aggiungi il nuovo giocatore allo stato
+        setOtherPlayers(prev => {
+          // Verifica se il giocatore già esiste
+          const exists = prev.some(p => p.id === data.player.id);
+          if (!exists) {
+            // Aggiungi solo se non esiste già
+            return [...prev, data.player];
+          }
+          return prev;
+        });
       }
       
       if (data.foodItems) {
@@ -101,13 +312,13 @@ export default function Home() {
     
     // Gestisci l'evento player-moved
     channel.bind('player-moved', (data) => {
-      if (data.playerId !== playerId) {
+      if (data.playerId !== playerId && data.player) {
+        console.log('RICEVUTO PLAYER-MOVED:', data.playerId);
+        
+        // Aggiorna la posizione del giocatore
         setOtherPlayers(prev => {
           const updated = prev.filter(p => p.id !== data.playerId);
-          if (data.player) {
-            return [...updated, data.player];
-          }
-          return updated;
+          return [...updated, data.player];
         });
       }
       
@@ -116,6 +327,7 @@ export default function Home() {
       }
     });
     
+    // Disconnetti al termine
     return () => {
       console.log('Disconnessione Pusher');
       channel.unbind_all();
@@ -123,6 +335,58 @@ export default function Home() {
       pusher.disconnect();
     };
   }, [gameStarted, playerId]);
+  
+  // Funzione di comunicazione con il server
+  const updateWithServer = async () => {
+    if (!playerState || !gameStarted || !playerId) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/move`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          playerId,
+          direction: directionRef.current,
+          playerState: {
+            ...playerState,
+            name: playerName,
+            color: playerColor
+          }
+        }),
+      });
+      
+      if (!response.ok) {
+        console.error(`Errore API: ${response.status}`);
+        return;
+      }
+      
+      const data = await response.json();
+      
+      // Aggiorna il tuo stato
+      setPlayerState(data.player);
+      setScore(data.player.score);
+      
+      // Aggiorna il cibo
+      if (data.foodItems) {
+        setFoodItems(data.foodItems);
+      }
+      
+      // Debug info prima di aggiornare
+      console.log(`SERVER: ricevuti ${data.otherPlayers?.length || 0} altri giocatori`);
+      if (data.otherPlayers && data.otherPlayers.length > 0) {
+        console.log('IDs:', data.otherPlayers.map(p => p.id).join(', '));
+      }
+      
+      // Aggiorna gli altri giocatori solo se definito
+      if (data.otherPlayers) {
+        setOtherPlayers(data.otherPlayers);
+      }
+    } catch (error) {
+      console.error('Errore comunicazione server:', error);
+    }
+  };
   
   // Gestione input da tastiera
   useEffect(() => {
@@ -291,231 +555,6 @@ export default function Home() {
     };
   }, [gameStarted, isMobile]);
   
-  // Loop di gioco semplificato con cicli separati
-  useEffect(() => {
-    if (!gameStarted || !playerId || !playerState) return;
-    
-    console.log('Avvio loop di gioco');
-    
-    // Preparazione del canvas
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.width = 800;
-      canvas.height = 600;
-    }
-    
-    // Loop di rendering
-    const renderInterval = setInterval(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      
-      const ctx = canvas.getContext('2d');
-      
-      // Clear canvas
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Sfondo
-      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      gradient.addColorStop(0, '#121212');
-      gradient.addColorStop(1, '#1e3a8a');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Disegna griglia
-      const gridSize = 20;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-      ctx.lineWidth = 0.5;
-      
-      for (let x = 0; x <= canvas.width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-      
-      for (let y = 0; y <= canvas.height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-      }
-      
-      // Disegna il cibo
-      foodItems.forEach(food => {
-        ctx.fillStyle = '#e73c3e'; // Rosso per il cibo
-        ctx.beginPath();
-        ctx.arc(
-          food.x + gridSize/2,
-          food.y + gridSize/2,
-          gridSize/2 - 2,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-      });
-      
-      // Disegna gli altri serpenti
-      if (otherPlayers && otherPlayers.length > 0) {
-        otherPlayers.forEach(player => {
-          if (player && player.snake && player.snake.length > 0) {
-            // Disegna il nome
-            ctx.fillStyle = 'white';
-            ctx.font = '12px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(player.name || 'Giocatore', player.snake[0].x + gridSize/2, player.snake[0].y - 5);
-            
-            // Disegna il serpente
-            player.snake.forEach((segment, i) => {
-              ctx.fillStyle = player.color || '#00ff00';
-              ctx.beginPath();
-              ctx.arc(
-                segment.x + gridSize/2,
-                segment.y + gridSize/2,
-                i === 0 ? gridSize/2 : gridSize/2 - 2, // Testa più grande
-                0,
-                Math.PI * 2
-              );
-              ctx.fill();
-            });
-          }
-        });
-      }
-      
-      // Disegna il proprio serpente
-      if (playerState.snake && playerState.snake.length > 0) {
-        // Disegna il nome
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(playerName || 'Tu', playerState.snake[0].x + gridSize/2, playerState.snake[0].y - 5);
-        
-        // Disegna il serpente
-        playerState.snake.forEach((segment, i) => {
-          ctx.fillStyle = playerColor;
-          ctx.beginPath();
-          ctx.arc(
-            segment.x + gridSize/2,
-            segment.y + gridSize/2,
-            i === 0 ? gridSize/2 : gridSize/2 - 2, // Testa più grande
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-        });
-      }
-      
-      // Disegna stats
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 16px Arial';
-      ctx.textAlign = 'left';
-      ctx.fillText(`Punteggio: ${score}`, 10, 25);
-      
-      ctx.textAlign = 'right';
-      ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
-    }, 1000 / 30); // Ridotto a 30 FPS per evitare sfarfallio
-    
-    // Loop di movimento locale
-    const moveInterval = setInterval(() => {
-      if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
-      
-      const gridSize = 20;
-      const head = { ...playerState.snake[0] };
-      const canvasWidth = 800;
-      const canvasHeight = 600;
-      
-      // Movimento locale basato sulla direzione
-      switch (directionRef.current) {
-        case 'up':
-          head.y -= gridSize;
-          if (head.y < 0) head.y = canvasHeight - gridSize;
-          break;
-        case 'down':
-          head.y += gridSize;
-          if (head.y >= canvasHeight) head.y = 0;
-          break;
-        case 'left':
-          head.x -= gridSize;
-          if (head.x < 0) head.x = canvasWidth - gridSize;
-          break;
-        case 'right':
-          head.x += gridSize;
-          if (head.x >= canvasWidth) head.x = 0;
-          break;
-      }
-      
-      // Aggiorna la posizione localmente
-      setPlayerState(prev => ({
-        ...prev,
-        snake: [head, ...prev.snake.slice(0, -1)]
-      }));
-      
-      lastDirectionRef.current = directionRef.current;
-    }, 1000 / 10); // 10 FPS per il movimento
-    
-    // Comunicazione col server
-    const serverInterval = setInterval(() => {
-      // Aggiorna con il server
-      updateWithServer();
-    }, 250); // Ogni 250ms
-    
-    // Pulizia
-    return () => {
-      clearInterval(renderInterval);
-      clearInterval(moveInterval);
-      clearInterval(serverInterval);
-    };
-  }, [gameStarted, playerId, playerState]);
-  
-  // Funzione di comunicazione con il server
-  const updateWithServer = async () => {
-    if (!playerState || !gameStarted || !playerId) return;
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/move`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          playerId,
-          direction: directionRef.current,
-          playerState: {
-            ...playerState,
-            name: playerName,
-            color: playerColor
-          }
-        }),
-      });
-      
-      if (!response.ok) {
-        console.error(`Errore API: ${response.status}`);
-        return;
-      }
-      
-      const data = await response.json();
-      
-      // Aggiorna il tuo stato
-      setPlayerState(data.player);
-      setScore(data.player.score);
-      
-      // Aggiorna il cibo
-      if (data.foodItems) {
-        setFoodItems(data.foodItems);
-      }
-      
-      // Aggiorna gli altri giocatori
-      if (data.otherPlayers) {
-        // Log solo se il numero è cambiato
-        if (data.otherPlayers.length !== otherPlayers.length) {
-          console.log(`Giocatori connessi: ${data.otherPlayers.length}`);
-        }
-        setOtherPlayers(data.otherPlayers);
-      }
-    } catch (error) {
-      console.error('Errore comunicazione col server:', error);
-    }
-  };
-  
   // Inizializzazione della partita
   const handleStartGame = async (e) => {
     e.preventDefault();
@@ -613,6 +652,18 @@ export default function Home() {
       ) : (
         <div id="game-container">
           <canvas ref={canvasRef} id="gameCanvas"></canvas>
+          
+          {/* Area debug per monitorare i problemi */}
+          <div id="debug-info" style={{
+            position: 'absolute',
+            top: '5px',
+            left: '5px',
+            color: 'white',
+            background: 'rgba(0,0,0,0.5)',
+            padding: '5px',
+            fontSize: '12px',
+            zIndex: 1000
+          }}></div>
           
           {isMobile && (
             <div className="controls-container">
