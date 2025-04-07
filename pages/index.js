@@ -74,91 +74,61 @@ export default function Home() {
   
   // Inizializza Pusher
   useEffect(() => {
-    if (gameStarted) {
-      try {
-        const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-          cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+    if (!gameStarted) return;
+
+    // Inizializza Pusher
+    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
+      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+    });
+
+    // Sottoscrivi al canale
+    const channel = pusher.subscribe('snake-game');
+
+    // Gestisci l'evento player-joined
+    channel.bind('player-joined', (data) => {
+      console.log('Nuovo giocatore unito:', data);
+      if (data.player && data.player.id !== playerId) {
+        setOtherPlayers(prevPlayers => {
+          const newPlayers = [...prevPlayers];
+          const existingIndex = newPlayers.findIndex(p => p.id === data.player.id);
+          if (existingIndex >= 0) {
+            newPlayers[existingIndex] = data.player;
+          } else {
+            newPlayers.push(data.player);
+          }
+          return newPlayers;
         });
-        
-        const channel = pusher.subscribe('snake-game');
-        
-        console.log('Iscritto al canale Pusher:', channel.name);
-        
-        channel.bind('player-joined', (data) => {
-          console.log('Evento player-joined ricevuto:', data);
-          
-          // Aggiorna l'elenco degli altri giocatori
-          if (data.player && data.player.id !== playerId) {
-            setOtherPlayers(prev => {
-              // Verifica se il giocatore esiste già
-              const exists = prev.some(p => p.id === data.player.id);
-              if (!exists) {
-                return [...prev, data.player];
-              }
-              return prev;
-            });
-          }
-          
-          // Aggiorna gli elementi cibo se necessario
-          if (data.foodItems) {
-            setFoodItems(data.foodItems);
-          }
-          
-          // Aggiorna la lista completa degli altri giocatori
-          if (data.otherPlayers) {
-            setOtherPlayers(data.otherPlayers);
-          }
-        });
-        
-        channel.bind('player-moved', (data) => {
-          console.log('Evento player-moved ricevuto:', data);
-          
-          // Aggiorna la posizione degli altri giocatori
-          if (data.playerId !== playerId && data.player) {
-            setOtherPlayers(prev => {
-              // Trova e aggiorna il giocatore specifico
-              const updatedPlayers = prev.map(p => {
-                if (p.id === data.playerId) {
-                  return data.player;
-                }
-                return p;
-              });
-              
-              // Se il giocatore non esiste ancora, aggiungilo
-              if (!updatedPlayers.some(p => p.id === data.playerId)) {
-                return [...updatedPlayers, data.player];
-              }
-              
-              return updatedPlayers;
-            });
-          }
-          
-          // Aggiorna gli elementi cibo se necessario
-          if (data.foodItems) {
-            setFoodItems(data.foodItems);
-          }
-          
-          // Aggiorna la lista completa degli altri giocatori
-          if (data.otherPlayers) {
-            setOtherPlayers(data.otherPlayers);
-          }
-        });
-        
-        // Salva il riferimento a Pusher
-        pusherRef.current = pusher;
-        
-        // Cleanup
-        return () => {
-          console.log('Chiusura connessione Pusher...');
-          channel.unbind_all();
-          pusher.unsubscribe('snake-game');
-          pusher.disconnect();
-        };
-      } catch (err) {
-        console.error('Errore nell\'inizializzazione di Pusher:', err);
-        setError('Errore di connessione: ' + err.message);
       }
-    }
+      if (data.foodItems) {
+        setFoodItems(data.foodItems);
+      }
+    });
+
+    // Gestisci l'evento player-moved
+    channel.bind('player-moved', (data) => {
+      console.log('Movimento giocatore ricevuto:', data);
+      if (data.playerId !== playerId) {
+        // Aggiorna la posizione degli altri giocatori immediatamente
+        setOtherPlayers(prevPlayers => {
+          const newPlayers = prevPlayers.filter(p => p.id !== data.playerId);
+          if (data.player) {
+            newPlayers.push(data.player);
+          }
+          return newPlayers;
+        });
+      }
+      
+      // Aggiorna sempre il cibo quando ricevuto dal server
+      if (data.foodItems) {
+        setFoodItems(data.foodItems);
+      }
+    });
+
+    return () => {
+      channel.unbind_all();
+      channel.unsubscribe();
+      pusher.disconnect();
+    };
   }, [gameStarted, playerId]);
   
   // Funzione di movimento locale predittivo (più fluido)
@@ -167,7 +137,7 @@ export default function Home() {
     
     const gridSize = 20;
     const head = { ...playerState.snake[0] };
-    const canvasWidth = 800; // Canvas più largo
+    const canvasWidth = 800;
     const canvasHeight = 600;
     
     // Aggiorna la posizione della testa in base alla direzione
@@ -195,7 +165,6 @@ export default function Home() {
     // Verifica collisione con altri serpenti
     const hasCollision = checkCollision(head, newSnake, otherPlayers);
     if (hasCollision) {
-      // Gestire la collisione (fine del gioco)
       console.log("Collisione rilevata!");
       return;
     }
@@ -204,9 +173,10 @@ export default function Home() {
     const eatenFoodIndex = foodItems.findIndex(food => head.x === food.x && head.y === food.y);
     
     if (eatenFoodIndex !== -1) {
+      // Non rimuoviamo il cibo localmente, aspettiamo la conferma dal server
       setPlayerState(prev => ({
         ...prev,
-        snake: [head, ...prev.snake], // Non rimuove l'ultimo segmento
+        snake: [head, ...prev.snake],
         score: prev.score + 10
       }));
       setScore(prev => prev + 10);
@@ -217,7 +187,6 @@ export default function Home() {
       }));
     }
     
-    // Salva l'ultima direzione
     lastDirectionRef.current = directionRef.current;
   };
   
@@ -250,7 +219,6 @@ export default function Home() {
     
     try {
       const API_BASE_URL = window.location.origin;
-      
       const apiUrl = `${API_BASE_URL}/api/move`;
       
       const res = await fetch(apiUrl, {
@@ -262,7 +230,7 @@ export default function Home() {
           playerId,
           direction: directionRef.current,
           playerState,
-          foodItems // Invia tutti gli elementi cibo
+          foodItems
         }),
       });
       
@@ -868,6 +836,77 @@ export default function Home() {
           </div>
         </div>
       )}
+      
+      <style jsx global>{`
+        :root {
+          --primary-color: #4a90e2;
+          --card-bg: #1a1a2e;
+          --text-color: #ffffff;
+          --text-secondary: #a0aec0;
+          --border-radius: 10px;
+        }
+        
+        body {
+          margin: 0;
+          padding: 0;
+          font-family: 'Poppins', sans-serif;
+          background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+          color: var(--text-color);
+          min-height: 100vh;
+        }
+        
+        * {
+          box-sizing: border-box;
+        }
+        
+        h1 {
+          font-size: 2.5rem;
+          margin-bottom: 2rem;
+          text-align: center;
+          color: var(--text-color);
+          text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+        
+        input {
+          padding: 0.5rem 1rem;
+          border: 2px solid rgba(255, 255, 255, 0.1);
+          border-radius: var(--border-radius);
+          background-color: rgba(255, 255, 255, 0.05);
+          color: var(--text-color);
+          font-size: 1rem;
+          transition: all 0.3s ease;
+        }
+        
+        input:focus {
+          outline: none;
+          border-color: var(--primary-color);
+          background-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        button {
+          width: 100%;
+          padding: 0.8rem;
+          border: none;
+          border-radius: var(--border-radius);
+          background-color: var(--primary-color);
+          color: white;
+          font-size: 1.1rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+        
+        button:hover {
+          background-color: #357abd;
+          transform: translateY(-1px);
+        }
+        
+        .error {
+          color: #e53e3e;
+          margin-top: 0.5rem;
+          text-align: center;
+        }
+      `}</style>
       
       <style jsx>{`
         .container {

@@ -94,7 +94,6 @@ export default async function handler(req, res) {
     
     // Se il giocatore non esiste nello stato globale, aggiungilo
     if (!player) {
-      // Crea un nuovo giocatore
       player = {
         ...playerState,
         id: playerId,
@@ -106,6 +105,8 @@ export default async function handler(req, res) {
       player.snake = playerState.snake;
       player.score = playerState.score;
       player.lastUpdate = Date.now();
+      player.name = playerState.name;
+      player.color = playerState.color;
     }
     
     // Stato locale per il client
@@ -115,7 +116,7 @@ export default async function handler(req, res) {
     // Calcola la nuova posizione della testa
     const gridSize = 20;
     const head = { ...player.snake[0] };
-    const canvasWidth = 800; // Larghezza aumentata
+    const canvasWidth = 800;
     const canvasHeight = 600;
     
     // Aggiorna la posizione della testa in base alla direzione
@@ -181,30 +182,12 @@ export default async function handler(req, res) {
         // Il serpente si muove normalmente
         player.snake = [head, ...player.snake.slice(0, -1)];
       }
-      
-      // Controlla collisioni con se stesso (game over)
-      for (let i = 1; i < player.snake.length; i++) {
-        if (head.x === player.snake[i].x && head.y === player.snake[i].y) {
-          // Reset del serpente
-          const randomPos = generateRandomPosition(
-            gameState.players.flatMap(p => p.snake || []).concat(gameState.foodItems)
-          );
-          
-          player.snake = [
-            randomPos,
-            { x: randomPos.x - gridSize, y: randomPos.y },
-            { x: randomPos.x - (2 * gridSize), y: randomPos.y }
-          ];
-          player.score = 0;
-          break;
-        }
-      }
     }
     
-    // Pulisce giocatori inattivi (più di 1 minuto senza aggiornamenti)
+    // Pulisce giocatori inattivi (più di 10 secondi senza aggiornamenti)
     const now = Date.now();
     gameState.players = gameState.players.filter(p => 
-      now - p.lastUpdate < 60000
+      now - p.lastUpdate < 10000
     );
     
     // Assicura che ci siano sempre abbastanza elementi cibo
@@ -228,13 +211,13 @@ export default async function handler(req, res) {
       player,
       foodItems: gameState.foodItems,
       hasEatenFood,
-      otherPlayers // Includi tutti gli altri giocatori nell'evento
+      otherPlayers
     });
     
     return res.status(200).json({
       player,
       foodItems: gameState.foodItems,
-      otherPlayers // Includi tutti gli altri giocatori nella risposta
+      otherPlayers
     });
     
   } catch (error) {
