@@ -9,12 +9,6 @@ const pusher = new Pusher({
     useTLS: true
 });
 
-// Stato del gioco (in memoria)
-let gameState = {
-    players: [],
-    food: { x: 0, y: 0 }
-};
-
 // Genera una posizione casuale per il cibo
 function generateFood() {
     const gridSize = 20;
@@ -27,8 +21,11 @@ function generateFood() {
     };
 }
 
-// Inizializza il cibo
-gameState.food = generateFood();
+// Stato del gioco condiviso utilizzando Pusher per la sincronizzazione
+const gameState = {
+    players: [],
+    food: generateFood()
+};
 
 export default async function handler(req, res) {
     // Abilita CORS
@@ -49,6 +46,8 @@ export default async function handler(req, res) {
     }
 
     try {
+        console.log('Richiesta join ricevuta:', req.body);
+        
         const { name, color } = req.body;
         
         if (!name || !color) {
@@ -62,7 +61,7 @@ export default async function handler(req, res) {
         const maxY = 30;
         
         const newPlayer = {
-            id: Date.now().toString(),
+            id: Date.now().toString(), // ID univoco basato sul timestamp
             name,
             color,
             snake: [
@@ -75,20 +74,24 @@ export default async function handler(req, res) {
             score: 0
         };
         
-        // Aggiungi il giocatore allo stato del gioco
-        gameState.players.push(newPlayer);
+        console.log('Nuovo giocatore creato:', newPlayer);
         
-        // Notifica tutti i client del nuovo giocatore
-        await pusher.trigger('snake-game', 'player-joined', {
-            players: gameState.players,
-            food: gameState.food
-        });
-        
-        return res.status(200).json({
+        // Invia lo stato iniziale al client
+        const initialState = {
             playerId: newPlayer.id,
-            players: gameState.players,
+            player: newPlayer,
+            food: gameState.food
+        };
+        
+        console.log('Invio stato iniziale:', initialState);
+        
+        // Notifica tutti i client del nuovo giocatore tramite Pusher
+        await pusher.trigger('snake-game', 'player-joined', {
+            newPlayer: newPlayer,
             food: gameState.food
         });
+        
+        return res.status(200).json(initialState);
     } catch (error) {
         console.error('Errore durante il join:', error);
         return res.status(500).json({ error: 'Errore del server' });

@@ -11,8 +11,11 @@ export default function Home() {
   const [playerColor, setPlayerColor] = useState('#ff0000');
   const [gameStarted, setGameStarted] = useState(false);
   const [error, setError] = useState('');
-  const [players, setPlayers] = useState([]);
-  const [food, setFood] = useState({ x: 0, y: 0 });
+  
+  // Stato locale del gioco
+  const [playerState, setPlayerState] = useState(null);
+  const [foodState, setFoodState] = useState({ x: 0, y: 0 });
+  const [otherPlayers, setOtherPlayers] = useState([]);
   const [playerId, setPlayerId] = useState(null);
   const [score, setScore] = useState(0);
   const [debugInfo, setDebugInfo] = useState('');
@@ -49,14 +52,38 @@ export default function Home() {
         channel.bind('player-joined', (data) => {
           console.log('Evento player-joined ricevuto:', data);
           setDebugInfo(prev => prev + '\nEvento player-joined ricevuto');
-          setPlayers(data.players);
-          setFood(data.food);
+          
+          // Aggiungi il nuovo giocatore agli altri giocatori se non è l'utente corrente
+          if (data.newPlayer && data.newPlayer.id !== playerId) {
+            setOtherPlayers(prev => [...prev, data.newPlayer]);
+          }
+          
+          // Aggiorna il cibo se necessario
+          if (data.food) {
+            setFoodState(data.food);
+          }
         });
         
         channel.bind('player-moved', (data) => {
           console.log('Evento player-moved ricevuto:', data);
-          setPlayers(data.players);
-          setFood(data.food);
+          setDebugInfo(prev => prev + '\nEvento player-moved ricevuto');
+          
+          // Aggiorna la posizione degli altri giocatori
+          if (data.playerId && data.playerId !== playerId && data.player) {
+            setOtherPlayers(prev => {
+              const newPlayers = [...prev];
+              const index = newPlayers.findIndex(p => p.id === data.playerId);
+              if (index !== -1) {
+                newPlayers[index] = data.player;
+              }
+              return newPlayers;
+            });
+          }
+          
+          // Aggiorna il cibo se necessario
+          if (data.food) {
+            setFoodState(data.food);
+          }
         });
         
         return () => {
@@ -71,11 +98,11 @@ export default function Home() {
         setError('Errore durante l\'inizializzazione di Pusher: ' + err.message);
       }
     }
-  }, [gameStarted]);
+  }, [gameStarted, playerId]);
   
   // Gestisce il loop di gioco
   useEffect(() => {
-    if (gameStarted && playerId) {
+    if (gameStarted && playerId && playerState) {
       try {
         console.log('Inizializzazione del canvas...');
         setDebugInfo(prev => prev + '\nInizializzazione del canvas...');
@@ -106,7 +133,7 @@ export default function Home() {
         // Funzione per disegnare il cibo
         const drawFood = () => {
           ctx.fillStyle = '#ff0000';
-          ctx.fillRect(food.x, food.y, gridSize, gridSize);
+          ctx.fillRect(foodState.x, foodState.y, gridSize, gridSize);
         };
         
         // Funzione per disegnare il punteggio
@@ -133,7 +160,9 @@ export default function Home() {
               },
               body: JSON.stringify({
                 playerId,
-                direction: directionRef.current
+                direction: directionRef.current,
+                playerState, // Invio lo stato attuale del giocatore
+                foodState    // Invio lo stato attuale del cibo
               }),
             });
             
@@ -149,14 +178,12 @@ export default function Home() {
             
             const data = await res.json();
             console.log('Dati ricevuti:', data);
-            setPlayers(data.players);
-            setFood(data.food);
             
-            // Aggiorna il punteggio del giocatore corrente
-            const currentPlayer = data.players.find(p => p.id === playerId);
-            if (currentPlayer) {
-              setScore(currentPlayer.score);
-            }
+            // Aggiorna lo stato locale
+            setPlayerState(data.player);
+            setFoodState(data.food);
+            setScore(data.player.score);
+            
           } catch (err) {
             console.error('Errore durante l\'aggiornamento:', err);
             setDebugInfo(prev => prev + '\nErrore aggiornamento: ' + err.message);
@@ -183,14 +210,22 @@ export default function Home() {
             ctx.stroke();
           }
           
-          // Disegna tutti i serpenti
-          players.forEach(player => {
-            console.log(`Disegno serpente di ${player.name}:`, player.snake);
-            drawSnake(player.snake, player.color);
+          // Disegna il giocatore corrente
+          if (playerState && playerState.snake) {
+            console.log(`Disegno serpente di ${playerState.name}:`, playerState.snake);
+            drawSnake(playerState.snake, playerState.color);
+          }
+          
+          // Disegna gli altri giocatori
+          otherPlayers.forEach(player => {
+            if (player && player.snake) {
+              console.log(`Disegno serpente di ${player.name}:`, player.snake);
+              drawSnake(player.snake, player.color);
+            }
           });
           
           // Disegna il cibo
-          console.log('Disegno cibo:', food);
+          console.log('Disegno cibo:', foodState);
           drawFood();
           
           // Disegna il punteggio
@@ -219,7 +254,7 @@ export default function Home() {
         setError('Errore durante l\'inizializzazione del gioco: ' + err.message);
       }
     }
-  }, [gameStarted, playerId, players, food, score]);
+  }, [gameStarted, playerId, playerState, foodState, otherPlayers, score]);
   
   // Gestisce gli input da tastiera
   useEffect(() => {
@@ -290,9 +325,11 @@ export default function Home() {
       console.log('Dati ricevuti:', data);
       setDebugInfo(prev => prev + '\nDati ricevuti con successo');
       
+      // Imposta lo stato iniziale dal server
       setPlayerId(data.playerId);
-      setPlayers(data.players);
-      setFood(data.food);
+      setPlayerState(data.player);
+      setFoodState(data.food);
+      setScore(data.player.score);
       setGameStarted(true);
       setError('');
       
