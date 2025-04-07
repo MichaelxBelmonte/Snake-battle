@@ -88,12 +88,12 @@ export default function Home() {
           console.log('Evento player-joined ricevuto:', data);
           
           // Aggiorna l'elenco degli altri giocatori
-          if (data.newPlayer && data.newPlayer.id !== playerId) {
+          if (data.player && data.player.id !== playerId) {
             setOtherPlayers(prev => {
               // Verifica se il giocatore esiste già
-              const exists = prev.some(p => p.id === data.newPlayer.id);
+              const exists = prev.some(p => p.id === data.player.id);
               if (!exists) {
-                return [...prev, data.newPlayer];
+                return [...prev, data.player];
               }
               return prev;
             });
@@ -546,12 +546,12 @@ export default function Home() {
         renderLoopRef.current = setInterval(() => {
           moveSnakeLocally(); // Movimento locale predittivo
           drawGame();
-        }, 1000 / 10); // ~10 FPS per il movimento locale (più lento)
+        }, 1000 / 15); // ~15 FPS per il movimento locale (più fluido)
         
         // Loop delle API
         apiLoopRef.current = setInterval(() => {
           updateWithServer();
-        }, 600); // Aggiorna con il server ogni 600ms (più lento)
+        }, 400); // Aggiorna con il server ogni 400ms (più frequente)
         
         return () => {
           console.log('Termine loop di gioco...');
