@@ -19,11 +19,14 @@ export default function Home() {
   const [playerId, setPlayerId] = useState(null);
   const [score, setScore] = useState(0);
   const [debugInfo, setDebugInfo] = useState('');
+  const [lastApiUpdate, setLastApiUpdate] = useState(0);
   
   const canvasRef = useRef(null);
   const pusherRef = useRef(null);
-  const gameLoopRef = useRef(null);
+  const renderLoopRef = useRef(null);
+  const apiLoopRef = useRef(null);
   const directionRef = useRef('right');
+  const lastDirectionRef = useRef('right');
   
   // Inizializza Pusher
   useEffect(() => {
@@ -66,7 +69,6 @@ export default function Home() {
         
         channel.bind('player-moved', (data) => {
           console.log('Evento player-moved ricevuto:', data);
-          setDebugInfo(prev => prev + '\nEvento player-moved ricevuto');
           
           // Aggiorna la posizione degli altri giocatori
           if (data.playerId && data.playerId !== playerId && data.player) {
@@ -75,6 +77,9 @@ export default function Home() {
               const index = newPlayers.findIndex(p => p.id === data.playerId);
               if (index !== -1) {
                 newPlayers[index] = data.player;
+              } else {
+                // Aggiungi il giocatore se non esiste
+                newPlayers.push(data.player);
               }
               return newPlayers;
             });
@@ -100,7 +105,98 @@ export default function Home() {
     }
   }, [gameStarted, playerId]);
   
-  // Gestisce il loop di gioco
+  // Funzione di movimento locale predittivo (più fluido)
+  const moveSnakeLocally = () => {
+    if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
+    
+    const gridSize = 20;
+    const head = { ...playerState.snake[0] };
+    
+    // Aggiorna la posizione della testa in base alla direzione
+    switch (directionRef.current) {
+      case 'up':
+        head.y -= gridSize;
+        if (head.y < 0) head.y = 600 - gridSize;
+        break;
+      case 'down':
+        head.y += gridSize;
+        if (head.y >= 600) head.y = 0;
+        break;
+      case 'left':
+        head.x -= gridSize;
+        if (head.x < 0) head.x = 600 - gridSize;
+        break;
+      case 'right':
+        head.x += gridSize;
+        if (head.x >= 600) head.x = 0;
+        break;
+    }
+    
+    const newSnake = [head, ...playerState.snake.slice(0, -1)];
+    
+    // Controlla se ha mangiato il cibo (questo è solo visivo, il server farà la verifica effettiva)
+    if (head.x === foodState.x && head.y === foodState.y) {
+      setPlayerState(prev => ({
+        ...prev,
+        snake: [head, ...prev.snake], // Non rimuove l'ultimo segmento
+        score: prev.score + 10
+      }));
+      setScore(prev => prev + 10);
+    } else {
+      setPlayerState(prev => ({
+        ...prev,
+        snake: newSnake
+      }));
+    }
+    
+    // Salva l'ultima direzione
+    lastDirectionRef.current = directionRef.current;
+  };
+  
+  // Loop di aggiornamento API
+  const updateWithServer = async () => {
+    if (!playerState || !playerId) return;
+    
+    try {
+      console.log('Invio richiesta di movimento...');
+      
+      const apiUrl = `${API_BASE_URL}/api/move`;
+      
+      const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          playerId,
+          direction: directionRef.current,
+          playerState,
+          foodState
+        }),
+      });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Errore API:', res.status, errorText);
+        setDebugInfo(prev => prev + `\nErrore API move: ${res.status} - ${errorText}`);
+        throw new Error(`Errore API: ${res.status}`);
+      }
+      
+      const data = await res.json();
+      
+      // Aggiorna lo stato locale con i dati dal server
+      setPlayerState(data.player);
+      setFoodState(data.food);
+      setScore(data.player.score);
+      setLastApiUpdate(Date.now());
+      
+    } catch (err) {
+      console.error('Errore durante l\'aggiornamento:', err);
+      setDebugInfo(prev => prev + '\nErrore aggiornamento: ' + err.message);
+    }
+  };
+  
+  // Gestisce il loop di gioco con rendering separato dalle API
   useEffect(() => {
     if (gameStarted && playerId && playerState) {
       try {
@@ -120,7 +216,6 @@ export default function Home() {
         canvas.height = 600;
         
         console.log('Canvas inizializzato:', canvas.width, 'x', canvas.height);
-        setDebugInfo(prev => prev + `\nCanvas inizializzato: ${canvas.width}x${canvas.height}`);
         
         // Funzione per disegnare il serpente
         const drawSnake = (snake, color) => {
@@ -141,53 +236,6 @@ export default function Home() {
           ctx.fillStyle = '#000';
           ctx.font = '20px Arial';
           ctx.fillText(`Punteggio: ${score}`, 10, 30);
-        };
-        
-        // Funzione per aggiornare il gioco
-        const updateGame = async () => {
-          try {
-            console.log('Invio richiesta di movimento...');
-            setDebugInfo(prev => prev + '\nInvio richiesta move...');
-            
-            const apiUrl = `${API_BASE_URL}/api/move`;
-            console.log('URL API move:', apiUrl);
-            setDebugInfo(prev => prev + `\nURL API move: ${apiUrl}`);
-            
-            const res = await fetch(apiUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                playerId,
-                direction: directionRef.current,
-                playerState, // Invio lo stato attuale del giocatore
-                foodState    // Invio lo stato attuale del cibo
-              }),
-            });
-            
-            console.log('Risposta ricevuta:', res.status);
-            setDebugInfo(prev => prev + `\nRisposta move: ${res.status}`);
-            
-            if (!res.ok) {
-              const errorText = await res.text();
-              console.error('Errore API:', res.status, errorText);
-              setDebugInfo(prev => prev + `\nErrore API move: ${res.status} - ${errorText}`);
-              throw new Error(`Errore API: ${res.status}`);
-            }
-            
-            const data = await res.json();
-            console.log('Dati ricevuti:', data);
-            
-            // Aggiorna lo stato locale
-            setPlayerState(data.player);
-            setFoodState(data.food);
-            setScore(data.player.score);
-            
-          } catch (err) {
-            console.error('Errore durante l\'aggiornamento:', err);
-            setDebugInfo(prev => prev + '\nErrore aggiornamento: ' + err.message);
-          }
         };
         
         // Funzione per disegnare il gioco
@@ -212,41 +260,44 @@ export default function Home() {
           
           // Disegna il giocatore corrente
           if (playerState && playerState.snake) {
-            console.log(`Disegno serpente di ${playerState.name}:`, playerState.snake);
             drawSnake(playerState.snake, playerState.color);
           }
           
           // Disegna gli altri giocatori
           otherPlayers.forEach(player => {
             if (player && player.snake) {
-              console.log(`Disegno serpente di ${player.name}:`, player.snake);
               drawSnake(player.snake, player.color);
             }
           });
           
           // Disegna il cibo
-          console.log('Disegno cibo:', foodState);
           drawFood();
           
           // Disegna il punteggio
           drawScore();
         };
         
-        // Avvia il loop di gioco
         console.log('Avvio loop di gioco...');
         setDebugInfo(prev => prev + '\nAvvio loop di gioco...');
         
         // Esegui drawGame una volta subito all'inizio
         drawGame();
         
-        gameLoopRef.current = setInterval(() => {
-          updateGame();
+        // Loop di rendering a 60 FPS
+        renderLoopRef.current = setInterval(() => {
+          moveSnakeLocally(); // Movimento locale predittivo
           drawGame();
-        }, 200);  // Riduco la velocità per meglio diagnosticare
+        }, 1000 / 15); // ~15 FPS per il movimento locale
+        
+        // Loop delle API molto più lento (sincronizzazione con server)
+        apiLoopRef.current = setInterval(() => {
+          updateWithServer();
+        }, 500); // Aggiorna con il server ogni 500ms
         
         return () => {
           console.log('Termine loop di gioco...');
-          clearInterval(gameLoopRef.current);
+          clearInterval(renderLoopRef.current);
+          clearInterval(apiLoopRef.current);
         };
       } catch (err) {
         console.error('Errore durante l\'inizializzazione del gioco:', err);
@@ -254,27 +305,25 @@ export default function Home() {
         setError('Errore durante l\'inizializzazione del gioco: ' + err.message);
       }
     }
-  }, [gameStarted, playerId, playerState, foodState, otherPlayers, score]);
+  }, [gameStarted, playerId, playerState]);
   
   // Gestisce gli input da tastiera
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (!gameStarted) return;
       
-      console.log('Tasto premuto:', e.key);
-      
       switch (e.key) {
         case 'ArrowUp':
-          if (directionRef.current !== 'down') directionRef.current = 'up';
+          if (lastDirectionRef.current !== 'down') directionRef.current = 'up';
           break;
         case 'ArrowDown':
-          if (directionRef.current !== 'up') directionRef.current = 'down';
+          if (lastDirectionRef.current !== 'up') directionRef.current = 'down';
           break;
         case 'ArrowLeft':
-          if (directionRef.current !== 'right') directionRef.current = 'left';
+          if (lastDirectionRef.current !== 'right') directionRef.current = 'left';
           break;
         case 'ArrowRight':
-          if (directionRef.current !== 'left') directionRef.current = 'right';
+          if (lastDirectionRef.current !== 'left') directionRef.current = 'right';
           break;
       }
     };
