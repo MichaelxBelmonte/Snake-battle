@@ -32,6 +32,18 @@ const adjustOpacity = (hex, opacity) => {
   return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 };
 
+// Rileva se è un dispositivo mobile
+const isMobileDevice = () => {
+  return (typeof window !== "undefined" && 
+    (navigator.userAgent.match(/Android/i) ||
+     navigator.userAgent.match(/webOS/i) ||
+     navigator.userAgent.match(/iPhone/i) ||
+     navigator.userAgent.match(/iPad/i) ||
+     navigator.userAgent.match(/iPod/i) ||
+     navigator.userAgent.match(/BlackBerry/i) ||
+     navigator.userAgent.match(/Windows Phone/i)));
+};
+
 export default function Home() {
   const [playerName, setPlayerName] = useState('');
   const [playerColor, setPlayerColor] = useState('#ff0000');
@@ -40,20 +52,27 @@ export default function Home() {
   
   // Stato locale del gioco
   const [playerState, setPlayerState] = useState(null);
-  const [foodState, setFoodState] = useState({ x: 0, y: 0 });
+  const [foodItems, setFoodItems] = useState([{ x: 0, y: 0 }]); // Array di cibo invece di un solo elemento
   const [otherPlayers, setOtherPlayers] = useState([]);
   const [playerId, setPlayerId] = useState(null);
   const [score, setScore] = useState(0);
   const [debugInfo, setDebugInfo] = useState('');
   const [lastApiUpdate, setLastApiUpdate] = useState(0);
   const [foodAnimation, setFoodAnimation] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
   
   const canvasRef = useRef(null);
+  const joystickRef = useRef(null);
   const pusherRef = useRef(null);
   const renderLoopRef = useRef(null);
   const apiLoopRef = useRef(null);
   const directionRef = useRef('right');
   const lastDirectionRef = useRef('right');
+  
+  // Rileva dispositivo mobile al caricamento
+  useEffect(() => {
+    setIsMobile(isMobileDevice());
+  }, []);
   
   // Inizializza Pusher
   useEffect(() => {
@@ -88,9 +107,9 @@ export default function Home() {
             setOtherPlayers(prev => [...prev, data.newPlayer]);
           }
           
-          // Aggiorna il cibo se necessario
-          if (data.food) {
-            setFoodState(data.food);
+          // Aggiorna gli elementi cibo se necessario
+          if (data.foodItems) {
+            setFoodItems(data.foodItems);
           }
         });
         
@@ -112,9 +131,9 @@ export default function Home() {
             });
           }
           
-          // Aggiorna il cibo se necessario
-          if (data.food) {
-            setFoodState(data.food);
+          // Aggiorna gli elementi cibo se necessario
+          if (data.foodItems) {
+            setFoodItems(data.foodItems);
           }
         });
         
@@ -138,31 +157,43 @@ export default function Home() {
     
     const gridSize = 20;
     const head = { ...playerState.snake[0] };
+    const canvasWidth = 800; // Canvas più largo
+    const canvasHeight = 600;
     
     // Aggiorna la posizione della testa in base alla direzione
     switch (directionRef.current) {
       case 'up':
         head.y -= gridSize;
-        if (head.y < 0) head.y = 600 - gridSize;
+        if (head.y < 0) head.y = canvasHeight - gridSize;
         break;
       case 'down':
         head.y += gridSize;
-        if (head.y >= 600) head.y = 0;
+        if (head.y >= canvasHeight) head.y = 0;
         break;
       case 'left':
         head.x -= gridSize;
-        if (head.x < 0) head.x = 600 - gridSize;
+        if (head.x < 0) head.x = canvasWidth - gridSize;
         break;
       case 'right':
         head.x += gridSize;
-        if (head.x >= 600) head.x = 0;
+        if (head.x >= canvasWidth) head.x = 0;
         break;
     }
     
     const newSnake = [head, ...playerState.snake.slice(0, -1)];
     
-    // Controlla se ha mangiato il cibo (questo è solo visivo, il server farà la verifica effettiva)
-    if (head.x === foodState.x && head.y === foodState.y) {
+    // Verifica collisione con altri serpenti
+    const hasCollision = checkCollision(head, newSnake, otherPlayers);
+    if (hasCollision) {
+      // Gestire la collisione (fine del gioco)
+      console.log("Collisione rilevata!");
+      return;
+    }
+    
+    // Controlla se ha mangiato il cibo
+    const eatenFoodIndex = foodItems.findIndex(food => head.x === food.x && head.y === food.y);
+    
+    if (eatenFoodIndex !== -1) {
       setPlayerState(prev => ({
         ...prev,
         snake: [head, ...prev.snake], // Non rimuove l'ultimo segmento
@@ -178,6 +209,29 @@ export default function Home() {
     
     // Salva l'ultima direzione
     lastDirectionRef.current = directionRef.current;
+  };
+  
+  // Funzione per verificare le collisioni
+  const checkCollision = (head, mySnake, others) => {
+    // Collisione con se stesso (esclusa la testa)
+    for (let i = 1; i < mySnake.length; i++) {
+      if (head.x === mySnake[i].x && head.y === mySnake[i].y) {
+        return true;
+      }
+    }
+    
+    // Collisione con altri serpenti
+    for (const player of others) {
+      if (!player.snake) continue;
+      
+      for (const segment of player.snake) {
+        if (head.x === segment.x && head.y === segment.y) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
   };
   
   // Loop di aggiornamento API
@@ -198,7 +252,7 @@ export default function Home() {
           playerId,
           direction: directionRef.current,
           playerState,
-          foodState
+          foodItems // Invia tutti gli elementi cibo
         }),
       });
       
@@ -213,7 +267,9 @@ export default function Home() {
       
       // Aggiorna lo stato locale con i dati dal server
       setPlayerState(data.player);
-      setFoodState(data.food);
+      if (data.foodItems) {
+        setFoodItems(data.foodItems);
+      }
       setScore(data.player.score);
       setLastApiUpdate(Date.now());
       
@@ -238,8 +294,8 @@ export default function Home() {
         const ctx = canvas.getContext('2d');
         const gridSize = 20;
         
-        // Imposta le dimensioni del canvas
-        canvas.width = 600;
+        // Imposta le dimensioni del canvas più grandi
+        canvas.width = 800;
         canvas.height = 600;
         
         console.log('Canvas inizializzato:', canvas.width, 'x', canvas.height);
@@ -331,56 +387,59 @@ export default function Home() {
           // Aggiorna l'animazione del cibo
           setFoodAnimation(prev => (prev + 0.05) % (Math.PI * 2));
           
-          // Disegna una mela invece di un quadrato
-          ctx.fillStyle = '#e73c3e';
-          ctx.beginPath();
-          
-          // Dimensione oscillante per l'animazione
-          const size = gridSize/2 + Math.sin(foodAnimation) * 2;
-          
-          ctx.arc(
-            foodState.x + gridSize/2, 
-            foodState.y + gridSize/2, 
-            size, 
-            0, 
-            Math.PI * 2
-          );
-          ctx.fill();
-          
-          // Picciolo
-          ctx.fillStyle = '#7d4e11';
-          ctx.fillRect(
-            foodState.x + gridSize/2 - 1, 
-            foodState.y + 2, 
-            2, 
-            5
-          );
-          
-          // Foglia
-          ctx.fillStyle = '#4CAF50';
-          ctx.beginPath();
-          ctx.ellipse(
-            foodState.x + gridSize/2 + 3, 
-            foodState.y + 4, 
-            3, 
-            2, 
-            Math.PI/4, 
-            0, 
-            Math.PI * 2
-          );
-          ctx.fill();
-          
-          // Brillantezza
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.beginPath();
-          ctx.arc(
-            foodState.x + gridSize/3, 
-            foodState.y + gridSize/3, 
-            gridSize/6, 
-            0, 
-            Math.PI * 2
-          );
-          ctx.fill();
+          // Disegna tutti gli elementi cibo
+          foodItems.forEach(food => {
+            // Disegna una mela invece di un quadrato
+            ctx.fillStyle = '#e73c3e';
+            ctx.beginPath();
+            
+            // Dimensione oscillante per l'animazione
+            const size = gridSize/2 + Math.sin(foodAnimation) * 2;
+            
+            ctx.arc(
+              food.x + gridSize/2, 
+              food.y + gridSize/2, 
+              size, 
+              0, 
+              Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Picciolo
+            ctx.fillStyle = '#7d4e11';
+            ctx.fillRect(
+              food.x + gridSize/2 - 1, 
+              food.y + 2, 
+              2, 
+              5
+            );
+            
+            // Foglia
+            ctx.fillStyle = '#4CAF50';
+            ctx.beginPath();
+            ctx.ellipse(
+              food.x + gridSize/2 + 3, 
+              food.y + 4, 
+              3, 
+              2, 
+              Math.PI/4, 
+              0, 
+              Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Brillantezza
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.beginPath();
+            ctx.arc(
+              food.x + gridSize/3, 
+              food.y + gridSize/3, 
+              gridSize/6, 
+              0, 
+              Math.PI * 2
+            );
+            ctx.fill();
+          });
         };
         
         // Funzione per disegnare il punteggio
@@ -471,16 +530,16 @@ export default function Home() {
         // Esegui drawGame una volta subito all'inizio
         drawGame();
         
-        // Loop di rendering a 60 FPS
+        // Loop di rendering a velocità ridotta
         renderLoopRef.current = setInterval(() => {
           moveSnakeLocally(); // Movimento locale predittivo
           drawGame();
-        }, 1000 / 15); // ~15 FPS per il movimento locale
+        }, 1000 / 10); // ~10 FPS per il movimento locale (più lento)
         
-        // Loop delle API molto più lento (sincronizzazione con server)
+        // Loop delle API
         apiLoopRef.current = setInterval(() => {
           updateWithServer();
-        }, 500); // Aggiorna con il server ogni 500ms
+        }, 600); // Aggiorna con il server ogni 600ms (più lento)
         
         return () => {
           console.log('Termine loop di gioco...');
@@ -522,6 +581,137 @@ export default function Home() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [gameStarted]);
+  
+  // Gestione dei touch per dispositivi mobili
+  useEffect(() => {
+    if (!isMobile || !gameStarted) return;
+    
+    let startX = 0;
+    let startY = 0;
+    
+    const handleTouchStart = (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    };
+    
+    const handleTouchMove = (e) => {
+      if (!startX || !startY) return;
+      
+      const diffX = e.touches[0].clientX - startX;
+      const diffY = e.touches[0].clientY - startY;
+      
+      // Determina la direzione del movimento in base al gesto swipe
+      if (Math.abs(diffX) > Math.abs(diffY)) {
+        // Movimento orizzontale
+        if (diffX > 0 && lastDirectionRef.current !== 'left') {
+          directionRef.current = 'right';
+        } else if (diffX < 0 && lastDirectionRef.current !== 'right') {
+          directionRef.current = 'left';
+        }
+      } else {
+        // Movimento verticale
+        if (diffY > 0 && lastDirectionRef.current !== 'up') {
+          directionRef.current = 'down';
+        } else if (diffY < 0 && lastDirectionRef.current !== 'down') {
+          directionRef.current = 'up';
+        }
+      }
+      
+      // Resetta le coordinate iniziali per il prossimo movimento
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    };
+    
+    const handleTouchEnd = () => {
+      startX = 0;
+      startY = 0;
+    };
+    
+    // Gestione del joystick virtuale
+    const setupJoystick = () => {
+      if (!joystickRef.current) return;
+      
+      const joystickElement = joystickRef.current;
+      const joystickBounds = joystickElement.getBoundingClientRect();
+      const joystickCenterX = joystickBounds.width / 2;
+      const joystickCenterY = joystickBounds.height / 2;
+      
+      let isDragging = false;
+      let stick = joystickElement.querySelector('.joystick-stick');
+      
+      // Tocco iniziale
+      joystickElement.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        isDragging = true;
+        updateJoystickPosition(e);
+      });
+      
+      // Movimento del joystick
+      joystickElement.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (isDragging) {
+          updateJoystickPosition(e);
+        }
+      });
+      
+      // Fine del tocco
+      joystickElement.addEventListener('touchend', () => {
+        isDragging = false;
+        // Riporta il joystick al centro
+        stick.style.transform = `translate(0px, 0px)`;
+      });
+      
+      // Aggiorna la posizione del joystick e la direzione
+      function updateJoystickPosition(e) {
+        const touch = e.touches[0];
+        const rect = joystickElement.getBoundingClientRect();
+        
+        // Calcola la posizione relativa al centro del joystick
+        let x = touch.clientX - rect.left - joystickCenterX;
+        let y = touch.clientY - rect.top - joystickCenterY;
+        
+        // Limita il movimento entro il cerchio del joystick
+        const distance = Math.sqrt(x * x + y * y);
+        const maxDistance = joystickCenterX - 10; // Raggio massimo
+        
+        if (distance > maxDistance) {
+          x = (x / distance) * maxDistance;
+          y = (y / distance) * maxDistance;
+        }
+        
+        // Muovi visivamente il joystick
+        stick.style.transform = `translate(${x}px, ${y}px)`;
+        
+        // Determina la direzione in base all'angolo
+        const angle = Math.atan2(y, x) * (180 / Math.PI);
+        
+        // Converti l'angolo nella direzione appropriata
+        if (angle > -45 && angle <= 45 && lastDirectionRef.current !== 'left') {
+          directionRef.current = 'right';
+        } else if (angle > 45 && angle <= 135 && lastDirectionRef.current !== 'up') {
+          directionRef.current = 'down';
+        } else if ((angle > 135 || angle <= -135) && lastDirectionRef.current !== 'right') {
+          directionRef.current = 'left';
+        } else if (angle > -135 && angle <= -45 && lastDirectionRef.current !== 'down') {
+          directionRef.current = 'up';
+        }
+      }
+    };
+    
+    // Aggiungi i listener di eventi per swipe e setup joystick
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd, { passive: false });
+    
+    // Setup joystick dopo un piccolo ritardo per garantire che il DOM sia pronto
+    setTimeout(setupJoystick, 500);
+    
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [isMobile, gameStarted]);
   
   const handleStartGame = async (e) => {
     e.preventDefault();
@@ -565,7 +755,12 @@ export default function Home() {
       // Imposta lo stato iniziale dal server
       setPlayerId(data.playerId);
       setPlayerState(data.player);
-      setFoodState(data.food);
+      if (data.foodItems) {
+        setFoodItems(data.foodItems);
+      } else if (data.food) {
+        // Retrocompatibilità con il vecchio formato
+        setFoodItems([data.food]);
+      }
       setScore(data.player.score);
       setGameStarted(true);
       setError('');
@@ -617,6 +812,7 @@ export default function Home() {
             <h2>Come giocare</h2>
             <ul>
               <li>Usa le <strong>frecce direzionali</strong> per muovere il serpente</li>
+              <li>Su <strong>dispositivi mobili</strong>, usa il joystick o fai swipe</li>
               <li>Raccogli il cibo per crescere e guadagnare punti</li>
               <li>Evita di scontrarti con gli altri serpenti</li>
               <li>Diventa il serpente più lungo della partita!</li>
@@ -626,13 +822,26 @@ export default function Home() {
       ) : (
         <div id="game-container">
           <canvas ref={canvasRef} id="gameCanvas"></canvas>
+          
+          {isMobile && (
+            <div className="joystick-container" ref={joystickRef}>
+              <div className="joystick-base">
+                <div className="joystick-stick"></div>
+              </div>
+            </div>
+          )}
+          
           <div className="game-info">
             <div className="stats">
               <div className="score">Punteggio: <span>{score}</span></div>
               <div className="player-count">Giocatori online: <span>{otherPlayers.length + 1}</span></div>
             </div>
             <div className="controls">
-              <p>Usa le frecce direzionali ↑ ↓ ← → per muovere il serpente</p>
+              {isMobile ? (
+                <p>Usa il joystick o fai swipe per muovere il serpente</p>
+              ) : (
+                <p>Usa le frecce direzionali ↑ ↓ ← → per muovere il serpente</p>
+              )}
             </div>
             {error && <p className="error">{error}</p>}
           </div>
@@ -646,6 +855,63 @@ export default function Home() {
       )}
       
       <style jsx>{`
+        .container {
+          max-width: 850px;
+          margin: 0 auto;
+          padding: 2rem;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+        
+        #game-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          width: 100%;
+          background-color: var(--card-bg);
+          border-radius: var(--border-radius);
+          padding: 1.5rem;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+          margin-top: 2rem;
+        }
+        
+        canvas {
+          width: 800px;
+          height: 600px;
+          max-width: 100%;
+          object-fit: contain;
+        }
+        
+        .joystick-container {
+          position: fixed;
+          bottom: 30px;
+          left: 30px;
+          z-index: 100;
+          touch-action: none;
+        }
+        
+        .joystick-base {
+          width: 120px;
+          height: 120px;
+          background: rgba(255, 255, 255, 0.1);
+          border: 2px solid rgba(255, 255, 255, 0.3);
+          border-radius: 50%;
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .joystick-stick {
+          width: 50px;
+          height: 50px;
+          background: var(--primary-color);
+          border-radius: 50%;
+          position: absolute;
+          box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+        
         .login-container {
           display: flex;
           flex-direction: column;
@@ -715,6 +981,7 @@ export default function Home() {
           display: flex;
           flex-direction: column;
           gap: 1rem;
+          width: 100%;
         }
         
         .stats {
@@ -737,6 +1004,45 @@ export default function Home() {
         .controls {
           font-size: 0.9rem;
           color: var(--text-secondary);
+          text-align: center;
+          margin-top: 0.5rem;
+        }
+        
+        /* Media query per dispositivi mobili */
+        @media (max-width: 768px) {
+          .container {
+            padding: 1rem;
+          }
+          
+          h1 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+          }
+          
+          #game-container {
+            padding: 1rem;
+          }
+          
+          canvas {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 4/3;
+          }
+          
+          .joystick-container {
+            bottom: 20px;
+            left: 20px;
+          }
+          
+          .joystick-base {
+            width: 100px;
+            height: 100px;
+          }
+          
+          .joystick-stick {
+            width: 40px;
+            height: 40px;
+          }
         }
       `}</style>
     </div>

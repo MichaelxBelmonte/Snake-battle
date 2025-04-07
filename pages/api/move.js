@@ -9,113 +9,215 @@ const pusher = new Pusher({
   useTLS: true
 });
 
-// Genera una posizione casuale per il cibo
-function generateFood() {
-  const gridSize = 20;
-  const maxX = 30;
-  const maxY = 30;
-  
-  return {
-    x: Math.floor(Math.random() * maxX) * gridSize,
-    y: Math.floor(Math.random() * maxY) * gridSize
-  };
-}
-
-// Aggiorna la posizione del serpente
-function updateSnakePosition(player, direction, food) {
-  console.log('Aggiornamento posizione serpente per:', player.id);
-  
-  const gridSize = 20;
-  const head = { ...player.snake[0] };
-  
-  // Aggiorna la posizione della testa in base alla direzione
-  switch (direction) {
-    case 'up':
-      head.y -= gridSize;
-      // Gestisce il wrapping dell'area di gioco
-      if (head.y < 0) head.y = 600 - gridSize;
-      break;
-    case 'down':
-      head.y += gridSize;
-      // Gestisce il wrapping dell'area di gioco
-      if (head.y >= 600) head.y = 0;
-      break;
-    case 'left':
-      head.x -= gridSize;
-      // Gestisce il wrapping dell'area di gioco
-      if (head.x < 0) head.x = 600 - gridSize;
-      break;
-    case 'right':
-      head.x += gridSize;
-      // Gestisce il wrapping dell'area di gioco
-      if (head.x >= 600) head.x = 0;
-      break;
-    default:
-      return { player, food };
-  }
-  
-  // Crea una nuova testa
-  const newSnake = [head, ...player.snake];
-  let newFood = food;
-  
-  // Controlla se il serpente ha mangiato il cibo
-  if (head.x === food.x && head.y === food.y) {
-    // Aumenta il punteggio
-    player.score += 10;
+// Controlla se c'è una collisione con altri serpenti
+const checkCollision = (head, players, currentPlayerId) => {
+  for (const player of players) {
+    // Salta il controllo sul giocatore corrente
+    if (player.id === currentPlayerId) continue;
     
-    // Genera nuovo cibo
-    newFood = generateFood();
-    console.log('Cibo mangiato! Nuovo cibo:', newFood);
-  } else {
-    // Rimuovi l'ultimo segmento se non ha mangiato
-    newSnake.pop();
+    // Controlla collisione con ogni segmento del serpente di un altro giocatore
+    for (const segment of player.snake || []) {
+      if (head.x === segment.x && head.y === segment.y) {
+        return true;
+      }
+    }
   }
   
-  // Aggiorna il serpente del giocatore
-  player.snake = newSnake;
-  player.direction = direction;
+  return false;
+};
+
+// Genera una posizione casuale sulla griglia
+const generateRandomPosition = (excludePositions = []) => {
+  const gridSize = 20;
+  const maxX = 800 - gridSize; // Aumentato a 800px per match con il client
+  const maxY = 600 - gridSize;
   
-  return { player, food: newFood };
-}
+  let newPosition;
+  let isColliding;
+  
+  do {
+    isColliding = false;
+    newPosition = {
+      x: Math.floor(Math.random() * (maxX / gridSize)) * gridSize,
+      y: Math.floor(Math.random() * (maxY / gridSize)) * gridSize
+    };
+    
+    // Verifica collisioni con posizioni da escludere
+    for (const pos of excludePositions) {
+      if (pos.x === newPosition.x && pos.y === newPosition.y) {
+        isColliding = true;
+        break;
+      }
+    }
+  } while (isColliding);
+  
+  return newPosition;
+};
+
+// Mantieni lo stato globale del gioco
+let gameState = {
+  players: [],
+  foodItems: [],
+  maxFood: 5, // Massimo 5 cibi contemporaneamente
+};
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Metodo non consentito' });
   }
-
+  
   try {
-    console.log('Richiesta move ricevuta:', req.body);
+    const { playerId, direction, playerState } = req.body;
     
-    const { playerId, direction, playerState, foodState } = req.body;
-    
-    if (!playerId || !direction || !playerState || !foodState) {
-      return res.status(400).json({ error: 'Dati insufficienti per aggiornare il gioco' });
+    if (!playerId || !direction || !playerState) {
+      return res.status(400).json({ error: 'Dati richiesti mancanti' });
     }
     
-    console.log('Stato attuale ricevuto dal client:', { player: playerState, food: foodState });
+    // Recupera il giocatore dallo stato di gioco globale
+    let player = gameState.players.find(p => p.id === playerId);
     
-    // Aggiorna la posizione del serpente
-    const { player: updatedPlayer, food: updatedFood } = updateSnakePosition(
-      playerState, 
-      direction, 
-      foodState
+    // Se il giocatore non esiste nello stato globale, aggiungilo
+    if (!player) {
+      // Crea un nuovo giocatore
+      player = {
+        ...playerState,
+        id: playerId,
+        lastUpdate: Date.now()
+      };
+      gameState.players.push(player);
+    } else {
+      // Aggiorna lo stato del giocatore esistente
+      player.snake = playerState.snake;
+      player.score = playerState.score;
+      player.lastUpdate = Date.now();
+    }
+    
+    // Stato locale per il client
+    let hasEatenFood = false;
+    let eatenFoodIndex = -1;
+    
+    // Calcola la nuova posizione della testa
+    const gridSize = 20;
+    const head = { ...player.snake[0] };
+    const canvasWidth = 800; // Larghezza aumentata
+    const canvasHeight = 600;
+    
+    // Aggiorna la posizione della testa in base alla direzione
+    switch (direction) {
+      case 'up':
+        head.y -= gridSize;
+        if (head.y < 0) head.y = canvasHeight - gridSize;
+        break;
+      case 'down':
+        head.y += gridSize;
+        if (head.y >= canvasHeight) head.y = 0;
+        break;
+      case 'left':
+        head.x -= gridSize;
+        if (head.x < 0) head.x = canvasWidth - gridSize;
+        break;
+      case 'right':
+        head.x += gridSize;
+        if (head.x >= canvasWidth) head.x = 0;
+        break;
+      default:
+        return res.status(400).json({ error: 'Direzione non valida' });
+    }
+    
+    // Controlla collisione con altri serpenti
+    if (checkCollision(head, gameState.players, playerId)) {
+      // Reset del serpente in caso di collisione (perdita)
+      const randomPos = generateRandomPosition(
+        gameState.players.flatMap(p => p.snake || []).concat(gameState.foodItems)
+      );
+      
+      player.snake = [
+        randomPos,
+        { x: randomPos.x - gridSize, y: randomPos.y },
+        { x: randomPos.x - (2 * gridSize), y: randomPos.y }
+      ];
+      player.score = 0;
+    } else {
+      // Controlla se il serpente ha mangiato del cibo
+      eatenFoodIndex = gameState.foodItems.findIndex(food => 
+        food.x === head.x && food.y === head.y
+      );
+      
+      if (eatenFoodIndex !== -1) {
+        // Il serpente ha mangiato del cibo
+        hasEatenFood = true;
+        player.score += 10;
+        
+        // Aggiunge un nuovo segmento al serpente (non rimuove l'ultimo)
+        player.snake = [head, ...player.snake];
+        
+        // Rimuove il cibo mangiato
+        gameState.foodItems.splice(eatenFoodIndex, 1);
+        
+        // Genera nuovo cibo
+        const occupiedPositions = [
+          ...gameState.foodItems,
+          ...gameState.players.flatMap(p => p.snake || [])
+        ];
+        const newFood = generateRandomPosition(occupiedPositions);
+        gameState.foodItems.push(newFood);
+      } else {
+        // Il serpente si muove normalmente
+        player.snake = [head, ...player.snake.slice(0, -1)];
+      }
+      
+      // Controlla collisioni con se stesso (game over)
+      for (let i = 1; i < player.snake.length; i++) {
+        if (head.x === player.snake[i].x && head.y === player.snake[i].y) {
+          // Reset del serpente
+          const randomPos = generateRandomPosition(
+            gameState.players.flatMap(p => p.snake || []).concat(gameState.foodItems)
+          );
+          
+          player.snake = [
+            randomPos,
+            { x: randomPos.x - gridSize, y: randomPos.y },
+            { x: randomPos.x - (2 * gridSize), y: randomPos.y }
+          ];
+          player.score = 0;
+          break;
+        }
+      }
+    }
+    
+    // Configura Pusher
+    const pusher = getPusherInstance();
+    
+    // Invia l'aggiornamento a tutti i client
+    await pusher.trigger('snake-game', 'player-moved', {
+      playerId,
+      player,
+      foodItems: gameState.foodItems,
+      hasEatenFood,
+    });
+    
+    // Pulisce giocatori inattivi (più di 1 minuto senza aggiornamenti)
+    const now = Date.now();
+    gameState.players = gameState.players.filter(p => 
+      now - p.lastUpdate < 60000
     );
     
-    console.log('Stato aggiornato:', { player: updatedPlayer, food: updatedFood });
-    
-    // Notifica tutti i client del movimento
-    await pusher.trigger('snake-game', 'player-moved', {
-      playerId: playerId,
-      player: updatedPlayer,
-      food: updatedFood
-    });
+    // Assicura che ci siano sempre abbastanza elementi cibo
+    while (gameState.foodItems.length < gameState.maxFood) {
+      const occupiedPositions = [
+        ...gameState.foodItems,
+        ...gameState.players.flatMap(p => p.snake || [])
+      ];
+      gameState.foodItems.push(generateRandomPosition(occupiedPositions));
+    }
     
     return res.status(200).json({
-      player: updatedPlayer,
-      food: updatedFood
+      player,
+      foodItems: gameState.foodItems
     });
+    
   } catch (error) {
-    console.error('Errore durante il movimento:', error);
+    console.error('Errore durante l\'elaborazione:', error);
     return res.status(500).json({ error: 'Errore del server' });
   }
 } 
