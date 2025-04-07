@@ -99,51 +99,54 @@ export default async function handler(req, res) {
         return;
     }
 
-    // Verifica che sia una richiesta POST
     if (req.method !== 'POST') {
-        res.status(405).json({ error: 'Metodo non consentito' });
-        return;
+        return res.status(405).json({ error: 'Metodo non consentito' });
     }
 
     try {
-        console.log('Richiesta join ricevuta:', req.body);
+        const { playerName, playerColor } = req.body;
         
-        const { name, color } = req.body;
-        
-        if (!name || !color) {
-            res.status(400).json({ error: 'Nome e colore sono richiesti' });
-            return;
+        if (!playerName || !playerColor) {
+            return res.status(400).json({ error: 'Nome e colore del giocatore sono richiesti' });
         }
         
-        // Verifica se abbiamo raggiunto il limite di giocatori
-        if (gameState.players.length >= gameState.maxPlayers) {
-            res.status(429).json({ error: 'Numero massimo di giocatori raggiunto. Riprova più tardi.' });
-            return;
-        }
+        // Verifica se il giocatore esiste già
+        let player = gameState.players.find(p => p.name === playerName);
         
-        // Genera un ID per il nuovo giocatore
-        const playerId = Date.now().toString();
-        
-        // Crea il serpente iniziale per il nuovo giocatore
-        const initialSnake = generateInitialSnake(gameState.players);
-        
-        // Crea lo stato del nuovo giocatore
-        const newPlayer = {
-            id: playerId,
-            name,
-            color,
-            snake: initialSnake,
-            score: 0,
-            lastUpdate: Date.now()
-        };
-        
-        // Aggiungi il nuovo giocatore allo stato del gioco
-        gameState.players.push(newPlayer);
-        
-        // Controlla se è necessario generare altro cibo
-        if (gameState.foodItems.length < gameState.maxFood) {
-            const numToAdd = gameState.maxFood - gameState.foodItems.length;
-            for (let i = 0; i < numToAdd; i++) {
+        if (player) {
+            // Aggiorna il colore se è cambiato
+            player.color = playerColor;
+            player.lastUpdate = Date.now();
+        } else {
+            // Verifica se è stato raggiunto il limite massimo di giocatori
+            if (gameState.players.length >= gameState.maxPlayers) {
+                return res.status(400).json({ error: 'Numero massimo di giocatori raggiunto' });
+            }
+            
+            // Genera una posizione iniziale casuale
+            const initialPosition = generateRandomPosition(
+                gameState.players.flatMap(p => p.snake || []).concat(gameState.foodItems)
+            );
+            
+            // Crea un nuovo giocatore
+            player = {
+                id: Date.now().toString(),
+                name: playerName,
+                color: playerColor,
+                snake: [
+                    initialPosition,
+                    { x: initialPosition.x - 20, y: initialPosition.y },
+                    { x: initialPosition.x - 40, y: initialPosition.y }
+                ],
+                score: 0,
+                lastUpdate: Date.now()
+            };
+            
+            // Aggiungi il nuovo giocatore allo stato di gioco
+            gameState.players.push(player);
+            
+            // Assicurati che ci siano abbastanza elementi cibo
+            while (gameState.foodItems.length < gameState.maxFood) {
                 const occupiedPositions = [
                     ...gameState.foodItems,
                     ...gameState.players.flatMap(p => p.snake || [])
@@ -155,22 +158,22 @@ export default async function handler(req, res) {
         // Configura Pusher
         const pusher = getPusherInstance();
         
-        // Notifica a tutti che un nuovo giocatore è entrato
+        // Notifica tutti i client che un nuovo giocatore si è unito
         await pusher.trigger('snake-game', 'player-joined', {
-            newPlayer,
-            foodItems: gameState.foodItems
+            player,
+            foodItems: gameState.foodItems,
+            otherPlayers: gameState.players.filter(p => p.id !== player.id)
         });
         
         // Ottieni gli altri giocatori (escludi il giocatore corrente)
-        const otherPlayers = gameState.players.filter(p => p.id !== playerId);
+        const otherPlayers = gameState.players.filter(p => p.id !== player.id);
         
-        // Rispondi con i dati iniziali del gioco
         return res.status(200).json({
-            playerId,
-            player: newPlayer,
+            player,
             foodItems: gameState.foodItems,
             otherPlayers // Includi tutti gli altri giocatori nella risposta
         });
+        
     } catch (error) {
         console.error('Errore durante l\'elaborazione:', error);
         return res.status(500).json({ error: 'Errore del server' });

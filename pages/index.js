@@ -106,16 +106,25 @@ export default function Home() {
         });
         
         channel.bind('player-moved', (data) => {
+          console.log('Evento player-moved ricevuto:', data);
+          
           // Aggiorna la posizione degli altri giocatori
           if (data.playerId !== playerId && data.player) {
             setOtherPlayers(prev => {
               // Trova e aggiorna il giocatore specifico
-              return prev.map(p => {
+              const updatedPlayers = prev.map(p => {
                 if (p.id === data.playerId) {
                   return data.player;
                 }
                 return p;
               });
+              
+              // Se il giocatore non esiste ancora, aggiungilo
+              if (!updatedPlayers.some(p => p.id === data.playerId)) {
+                return [...updatedPlayers, data.player];
+              }
+              
+              return updatedPlayers;
             });
           }
           
@@ -262,7 +271,7 @@ export default function Home() {
       
       // Aggiorna la lista completa degli altri giocatori
       if (data.otherPlayers) {
-        setOtherPlayers(data.otherPlayers.filter(p => p.id !== playerId));
+        setOtherPlayers(data.otherPlayers);
       }
     } catch (err) {
       console.error('Errore di aggiornamento con il server:', err);
@@ -554,7 +563,7 @@ export default function Home() {
         setError('Errore di gioco: ' + err.message);
       }
     }
-  }, [gameStarted, playerId, playerState]);
+  }, [gameStarted, playerId, playerState, otherPlayers]);
   
   // Gestisce gli input da tastiera
   useEffect(() => {
@@ -758,6 +767,12 @@ export default function Home() {
         setFoodItems([data.food]);
       }
       setScore(data.player.score);
+      
+      // Imposta gli altri giocatori
+      if (data.otherPlayers) {
+        setOtherPlayers(data.otherPlayers);
+      }
+      
       setGameStarted(true);
       setError('');
       

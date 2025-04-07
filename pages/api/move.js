@@ -201,17 +201,6 @@ export default async function handler(req, res) {
       }
     }
     
-    // Configura Pusher
-    const pusher = getPusherInstance();
-    
-    // Invia l'aggiornamento a tutti i client
-    await pusher.trigger('snake-game', 'player-moved', {
-      playerId,
-      player,
-      foodItems: gameState.foodItems,
-      hasEatenFood,
-    });
-    
     // Pulisce giocatori inattivi (più di 1 minuto senza aggiornamenti)
     const now = Date.now();
     gameState.players = gameState.players.filter(p => 
@@ -226,6 +215,18 @@ export default async function handler(req, res) {
       ];
       gameState.foodItems.push(generateRandomPosition(occupiedPositions));
     }
+    
+    // Configura Pusher
+    const pusher = getPusherInstance();
+    
+    // Invia l'aggiornamento a tutti i client
+    await pusher.trigger('snake-game', 'player-moved', {
+      playerId,
+      player,
+      foodItems: gameState.foodItems,
+      hasEatenFood,
+      otherPlayers: gameState.players.filter(p => p.id !== playerId)
+    });
     
     // Ottieni gli altri giocatori (escludi il giocatore corrente)
     const otherPlayers = gameState.players.filter(p => p.id !== playerId);
