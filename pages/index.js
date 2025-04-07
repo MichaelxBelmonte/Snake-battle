@@ -88,23 +88,30 @@ export default function Home() {
     // Riferimenti alle funzioni di rendering e update
     let movementTimestamp = 0;
     let serverUpdateTimestamp = 0;
+    let lastRenderTimestamp = 0;
     
     // Funzione principale di game loop
     const gameLoop = (timestamp) => {
-      // Aggiorna logica di movimento (10 FPS - ogni 100ms)
-      if (timestamp - movementTimestamp > 100) {
+      // Controlla se è ora di renderizzare (limita a 30 FPS)
+      const shouldRender = timestamp - lastRenderTimestamp > 33; // ~30 FPS
+      
+      // Aggiorna logica di movimento (5 FPS - ogni 200ms)
+      if (timestamp - movementTimestamp > 200) {
         updateLocalMovement();
         movementTimestamp = timestamp;
       }
       
-      // Aggiorna con il server (ogni 250ms)
-      if (timestamp - serverUpdateTimestamp > 250) {
+      // Aggiorna con il server (ogni 500ms = 2 volte al secondo)
+      if (timestamp - serverUpdateTimestamp > 500) {
         updateWithServer();
         serverUpdateTimestamp = timestamp;
       }
       
-      // Rendering (60 FPS)
-      renderGame();
+      // Rendering (30 FPS max)
+      if (shouldRender) {
+        renderGame();
+        lastRenderTimestamp = timestamp;
+      }
       
       // Continua il loop
       renderLoopRef.current = requestAnimationFrame(gameLoop);
