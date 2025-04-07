@@ -76,12 +76,8 @@ export default function Home() {
   useEffect(() => {
     if (!gameStarted || !playerId) return;
     
-    // Debug
-    console.log('INIT PUSHER, playerId:', playerId);
-    console.log('Altri giocatori iniziali:', otherPlayers.length);
-    
-    // Rimuovi tutti i giocatori precedenti
-    setOtherPlayers([]);
+    // Debug (minimizzato)
+    console.log('Inizializzazione Pusher:', playerId);
     
     // Inizializza Pusher
     const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
@@ -93,10 +89,8 @@ export default function Home() {
     
     // Gestisci l'evento player-joined
     channel.bind('player-joined', (data) => {
-      console.log('PLAYER JOINED EVENT:', data.player?.id);
-      
       if (data.player && data.player.id !== playerId) {
-        console.log('Aggiungendo nuovo giocatore:', data.player.id);
+        console.log('Nuovo giocatore:', data.player.id);
         setOtherPlayers(prev => [...prev, data.player]);
       }
       
@@ -107,11 +101,7 @@ export default function Home() {
     
     // Gestisci l'evento player-moved
     channel.bind('player-moved', (data) => {
-      console.log('PLAYER MOVED EVENT:', data.playerId);
-      
       if (data.playerId !== playerId) {
-        console.log('Aggiornando posizione di:', data.playerId);
-        
         setOtherPlayers(prev => {
           const updated = prev.filter(p => p.id !== data.playerId);
           if (data.player) {
@@ -126,21 +116,193 @@ export default function Home() {
       }
     });
     
-    console.log('Pusher configurato e in ascolto');
-    
     return () => {
-      console.log('Pulizia Pusher');
+      console.log('Disconnessione Pusher');
       channel.unbind_all();
       channel.unsubscribe();
       pusher.disconnect();
     };
   }, [gameStarted, playerId]);
   
+  // Gestione input da tastiera
+  useEffect(() => {
+    if (!gameStarted) return;
+    
+    const handleKeyDown = (e) => {
+      switch(e.key) {
+        case 'ArrowUp':
+          if (lastDirectionRef.current !== 'down') {
+            directionRef.current = 'up';
+          }
+          break;
+        case 'ArrowDown':
+          if (lastDirectionRef.current !== 'up') {
+            directionRef.current = 'down';
+          }
+          break;
+        case 'ArrowLeft':
+          if (lastDirectionRef.current !== 'right') {
+            directionRef.current = 'left';
+          }
+          break;
+        case 'ArrowRight':
+          if (lastDirectionRef.current !== 'left') {
+            directionRef.current = 'right';
+          }
+          break;
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [gameStarted]);
+  
+  // Gestione joystick per mobile
+  useEffect(() => {
+    if (!gameStarted || !isMobile) return;
+    
+    // Gestione swipe
+    let startX = 0;
+    let startY = 0;
+    
+    const handleTouchStart = (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    };
+    
+    const handleTouchMove = (e) => {
+      if (!startX || !startY) return;
+      
+      const diffX = e.touches[0].clientX - startX;
+      const diffY = e.touches[0].clientY - startY;
+      
+      // Determina la direzione del movimento
+      if (Math.abs(diffX) > Math.abs(diffY)) {
+        // Movimento orizzontale
+        if (diffX > 0 && lastDirectionRef.current !== 'left') {
+          directionRef.current = 'right';
+        } else if (diffX < 0 && lastDirectionRef.current !== 'right') {
+          directionRef.current = 'left';
+        }
+      } else {
+        // Movimento verticale
+        if (diffY > 0 && lastDirectionRef.current !== 'up') {
+          directionRef.current = 'down';
+        } else if (diffY < 0 && lastDirectionRef.current !== 'down') {
+          directionRef.current = 'up';
+        }
+      }
+      
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    };
+    
+    const handleTouchEnd = () => {
+      startX = 0;
+      startY = 0;
+    };
+    
+    // Setup joystick
+    const setupJoystick = () => {
+      if (!joystickRef.current) return;
+      
+      const joystickElement = joystickRef.current;
+      const joystickBounds = joystickElement.getBoundingClientRect();
+      const joystickCenterX = joystickBounds.width / 2;
+      const joystickCenterY = joystickBounds.height / 2;
+      
+      let isDragging = false;
+      let stick = joystickElement.querySelector('.joystick-stick');
+      
+      // Tocco iniziale
+      joystickElement.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        isDragging = true;
+        updateJoystickPosition(e);
+      });
+      
+      // Movimento del joystick
+      joystickElement.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (isDragging) {
+          updateJoystickPosition(e);
+        }
+      });
+      
+      // Fine del tocco
+      joystickElement.addEventListener('touchend', () => {
+        isDragging = false;
+        // Riporta il joystick al centro
+        stick.style.transform = `translate(0px, 0px)`;
+      });
+      
+      // Aggiorna la posizione del joystick e la direzione
+      function updateJoystickPosition(e) {
+        const touch = e.touches[0];
+        const rect = joystickElement.getBoundingClientRect();
+        
+        // Calcola la posizione relativa al centro del joystick
+        let x = touch.clientX - rect.left - joystickCenterX;
+        let y = touch.clientY - rect.top - joystickCenterY;
+        
+        // Limita il movimento entro il cerchio del joystick
+        const distance = Math.sqrt(x * x + y * y);
+        const maxDistance = joystickCenterX - 10; // Raggio massimo
+        
+        if (distance > maxDistance) {
+          x = (x / distance) * maxDistance;
+          y = (y / distance) * maxDistance;
+        }
+        
+        // Muovi visivamente il joystick
+        stick.style.transform = `translate(${x}px, ${y}px)`;
+        
+        // Determina la direzione in base all'angolo
+        const angle = Math.atan2(y, x) * (180 / Math.PI);
+        
+        // Converti l'angolo nella direzione appropriata
+        if (angle > -45 && angle <= 45 && lastDirectionRef.current !== 'left') {
+          directionRef.current = 'right';
+        } else if (angle > 45 && angle <= 135 && lastDirectionRef.current !== 'up') {
+          directionRef.current = 'down';
+        } else if ((angle > 135 || angle <= -135) && lastDirectionRef.current !== 'right') {
+          directionRef.current = 'left';
+        } else if (angle > -135 && angle <= -45 && lastDirectionRef.current !== 'down') {
+          directionRef.current = 'up';
+        }
+      }
+    };
+    
+    // Aggiungi eventi per swipe
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd, { passive: false });
+    
+    // Setup joystick con leggero ritardo
+    setTimeout(setupJoystick, 500);
+    
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [gameStarted, isMobile]);
+  
   // Loop di gioco semplificato con cicli separati
   useEffect(() => {
     if (!gameStarted || !playerId || !playerState) return;
     
     console.log('Avvio loop di gioco');
+    
+    // Preparazione del canvas
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.width = 800;
+      canvas.height = 600;
+    }
     
     // Loop di rendering
     const renderInterval = setInterval(() => {
@@ -192,33 +354,32 @@ export default function Home() {
         ctx.fill();
       });
       
-      // DEBUG info
-      console.log(`Rendering: ${otherPlayers.length} altri giocatori`);
-      
       // Disegna gli altri serpenti
-      otherPlayers.forEach(player => {
-        if (player && player.snake && player.snake.length > 0) {
-          // Disegna il nome
-          ctx.fillStyle = 'white';
-          ctx.font = '12px Arial';
-          ctx.textAlign = 'center';
-          ctx.fillText(player.name || 'Giocatore', player.snake[0].x + gridSize/2, player.snake[0].y - 5);
-          
-          // Disegna il serpente
-          player.snake.forEach((segment, i) => {
-            ctx.fillStyle = player.color || '#00ff00';
-            ctx.beginPath();
-            ctx.arc(
-              segment.x + gridSize/2,
-              segment.y + gridSize/2,
-              i === 0 ? gridSize/2 : gridSize/2 - 2, // Testa più grande
-              0,
-              Math.PI * 2
-            );
-            ctx.fill();
-          });
-        }
-      });
+      if (otherPlayers && otherPlayers.length > 0) {
+        otherPlayers.forEach(player => {
+          if (player && player.snake && player.snake.length > 0) {
+            // Disegna il nome
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(player.name || 'Giocatore', player.snake[0].x + gridSize/2, player.snake[0].y - 5);
+            
+            // Disegna il serpente
+            player.snake.forEach((segment, i) => {
+              ctx.fillStyle = player.color || '#00ff00';
+              ctx.beginPath();
+              ctx.arc(
+                segment.x + gridSize/2,
+                segment.y + gridSize/2,
+                i === 0 ? gridSize/2 : gridSize/2 - 2, // Testa più grande
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+            });
+          }
+        });
+      }
       
       // Disegna il proprio serpente
       if (playerState.snake && playerState.snake.length > 0) {
@@ -251,7 +412,7 @@ export default function Home() {
       
       ctx.textAlign = 'right';
       ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
-    }, 1000 / 60); // 60 FPS
+    }, 1000 / 30); // Ridotto a 30 FPS per evitare sfarfallio
     
     // Loop di movimento locale
     const moveInterval = setInterval(() => {
@@ -289,20 +450,13 @@ export default function Home() {
       }));
       
       lastDirectionRef.current = directionRef.current;
-    }, 1000 / 10); // 10 FPS
+    }, 1000 / 10); // 10 FPS per il movimento
     
     // Comunicazione col server
     const serverInterval = setInterval(() => {
       // Aggiorna con il server
       updateWithServer();
-    }, 250); // Ogni 250ms (4 volte al secondo)
-    
-    // Preparazione del canvas
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.width = 800;
-      canvas.height = 600;
-    }
+    }, 250); // Ogni 250ms
     
     // Pulizia
     return () => {
@@ -310,7 +464,7 @@ export default function Home() {
       clearInterval(moveInterval);
       clearInterval(serverInterval);
     };
-  }, [gameStarted, playerId, playerState, foodItems, otherPlayers, score]);
+  }, [gameStarted, playerId, playerState]);
   
   // Funzione di comunicazione con il server
   const updateWithServer = async () => {
@@ -351,12 +505,14 @@ export default function Home() {
       
       // Aggiorna gli altri giocatori
       if (data.otherPlayers) {
-        console.log(`SERVER: ricevuti ${data.otherPlayers.length} altri giocatori`);
-        // Completa sostituzione degli altri giocatori
+        // Log solo se il numero è cambiato
+        if (data.otherPlayers.length !== otherPlayers.length) {
+          console.log(`Giocatori connessi: ${data.otherPlayers.length}`);
+        }
         setOtherPlayers(data.otherPlayers);
       }
     } catch (error) {
-      console.error('Errore nella comunicazione con il server:', error);
+      console.error('Errore comunicazione col server:', error);
     }
   };
   

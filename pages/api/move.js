@@ -72,8 +72,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Dati richiesti mancanti' });
     }
     
-    console.log(`API move: giocatore ${playerId}, direzione ${direction}`);
-    
     // Recupera il giocatore dallo stato di gioco globale
     let player = gameState.players.find(p => p.id === playerId);
     
@@ -84,7 +82,7 @@ export default async function handler(req, res) {
         id: playerId,
         lastUpdate: Date.now()
       };
-      console.log(`Aggiunto nuovo giocatore: ${playerState.name || playerId}`);
+      console.log(`Nuovo giocatore: ${playerState.name || playerId}`);
       gameState.players.push(player);
     } else {
       // Aggiorna lo stato del giocatore esistente
@@ -152,7 +150,7 @@ export default async function handler(req, res) {
     
     // Controlla collisione
     if (checkCollision(head, gameState.players, playerId)) {
-      console.log(`Giocatore ${player.name || playerId} ha avuto una collisione`);
+      console.log(`Collisione: ${player.name || playerId}`);
       // Reset del serpente in caso di collisione (perdita)
       const randomPos = generateRandomPosition(
         gameState.players.flatMap(p => p.snake || []).concat(gameState.foodItems)
@@ -174,7 +172,6 @@ export default async function handler(req, res) {
         // Il serpente ha mangiato del cibo
         hasEatenFood = true;
         player.score += 10;
-        console.log(`Giocatore ${player.name || playerId} ha mangiato cibo: +10 punti`);
         
         // Aggiunge un nuovo segmento al serpente (non rimuove l'ultimo)
         player.snake = [head, ...player.snake];
@@ -195,10 +192,10 @@ export default async function handler(req, res) {
       }
     }
     
-    // Pulisce giocatori inattivi (più di 5 secondi senza aggiornamenti)
+    // Pulisce giocatori inattivi (più di 15 secondi senza aggiornamenti)
     const now = Date.now();
     const playersBeforeCleanup = gameState.players.length;
-    gameState.players = gameState.players.filter(p => now - p.lastUpdate < 5000);
+    gameState.players = gameState.players.filter(p => now - p.lastUpdate < 15000);
     
     if (playersBeforeCleanup !== gameState.players.length) {
       console.log(`Rimossi ${playersBeforeCleanup - gameState.players.length} giocatori inattivi`);
@@ -215,7 +212,6 @@ export default async function handler(req, res) {
     
     // Ottieni gli altri giocatori (escludi il giocatore corrente)
     const otherPlayers = gameState.players.filter(p => p.id !== playerId);
-    console.log(`API move: Inviando ${otherPlayers.length} altri giocatori a ${playerId}`);
     
     // Configura Pusher
     const pusher = getPusherInstance();
