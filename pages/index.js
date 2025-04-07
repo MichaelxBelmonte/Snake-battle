@@ -106,19 +106,30 @@ export default function Home() {
 
     // Gestisci l'evento player-moved
     channel.bind('player-moved', (data) => {
-      console.log('Movimento giocatore ricevuto:', data);
       if (data.playerId !== playerId) {
-        // Aggiorna la posizione degli altri giocatori immediatamente
         setOtherPlayers(prevPlayers => {
-          const newPlayers = prevPlayers.filter(p => p.id !== data.playerId);
-          if (data.player) {
-            newPlayers.push(data.player);
+          // Trova il giocatore esistente
+          const existingPlayerIndex = prevPlayers.findIndex(p => p.id === data.playerId);
+          const updatedPlayers = [...prevPlayers];
+          
+          if (existingPlayerIndex !== -1) {
+            // Aggiorna il giocatore esistente
+            updatedPlayers[existingPlayerIndex] = {
+              ...updatedPlayers[existingPlayerIndex],
+              ...data.player
+            };
+          } else {
+            // Aggiungi il nuovo giocatore
+            updatedPlayers.push(data.player);
           }
-          return newPlayers;
+          
+          // Rimuovi i giocatori inattivi (più di 10 secondi senza aggiornamenti)
+          const now = Date.now();
+          return updatedPlayers.filter(p => now - p.lastUpdate < 10000);
         });
       }
       
-      // Aggiorna sempre il cibo quando ricevuto dal server
+      // Aggiorna il cibo se necessario
       if (data.foodItems) {
         setFoodItems(data.foodItems);
       }
@@ -213,15 +224,12 @@ export default function Home() {
     return false;
   };
   
-  // Loop di aggiornamento API
+  // Funzione di aggiornamento con il server
   const updateWithServer = async () => {
-    if (!playerState || !playerId) return;
-    
+    if (!playerState || !gameStarted) return;
+
     try {
-      const API_BASE_URL = window.location.origin;
-      const apiUrl = `${API_BASE_URL}/api/move`;
-      
-      const res = await fetch(apiUrl, {
+      const response = await fetch(`${API_BASE_URL}/api/move`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -229,32 +237,66 @@ export default function Home() {
         body: JSON.stringify({
           playerId,
           direction: directionRef.current,
-          playerState,
-          foodItems
+          playerState: {
+            ...playerState,
+            lastUpdate: Date.now()
+          }
         }),
       });
+
+      if (!response.ok) throw new Error('Errore nella risposta del server');
+
+      const data = await response.json();
       
-      if (!res.ok) {
-        throw new Error(`Errore API: ${res.status}`);
-      }
-      
-      const data = await res.json();
-      
-      // Aggiorna lo stato locale con i dati dal server
+      // Aggiorna lo stato del giocatore
       setPlayerState(data.player);
+      
+      // Aggiorna il cibo
       if (data.foodItems) {
         setFoodItems(data.foodItems);
       }
-      setScore(data.player.score);
       
-      // Aggiorna la lista completa degli altri giocatori
+      // Aggiorna gli altri giocatori
       if (data.otherPlayers) {
         setOtherPlayers(data.otherPlayers);
       }
-    } catch (err) {
-      console.error('Errore di aggiornamento con il server:', err);
-      setError('Errore di comunicazione: ' + err.message);
+      
+    } catch (error) {
+      console.error('Errore durante l\'aggiornamento:', error);
     }
+  };
+  
+  // Funzione di rendering del gioco
+  const drawGame = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Disegna la griglia
+    drawGrid();
+    
+    // Disegna il cibo
+    drawFood();
+    
+    // Disegna gli altri giocatori
+    otherPlayers.forEach(player => {
+      if (player && player.snake && player.color) {
+        drawSnake(player.snake, player.color, player.name || 'Giocatore');
+      }
+    });
+    
+    // Disegna il serpente del giocatore
+    if (playerState && playerState.snake) {
+      drawSnake(playerState.snake, playerColor, playerName || 'Tu');
+    }
+    
+    // Disegna il punteggio
+    drawScore();
+    
+    // Richiedi il prossimo frame
+    renderLoopRef.current = requestAnimationFrame(drawGame);
   };
   
   // Gestisce il loop di gioco con rendering separato dalle API
