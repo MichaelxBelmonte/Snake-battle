@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import Pusher from 'pusher-js';
 
+// URL dell'API da utilizzare in produzione o in sviluppo
+const API_BASE_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://snake-battle.vercel.app' 
+  : '';
+
 export default function Home() {
   const [playerName, setPlayerName] = useState('');
   const [playerColor, setPlayerColor] = useState('#ff0000');
@@ -115,8 +120,13 @@ export default function Home() {
         const updateGame = async () => {
           try {
             console.log('Invio richiesta di movimento...');
+            setDebugInfo(prev => prev + '\nInvio richiesta move...');
             
-            const res = await fetch('/api/move', {
+            const apiUrl = `${API_BASE_URL}/api/move`;
+            console.log('URL API move:', apiUrl);
+            setDebugInfo(prev => prev + `\nURL API move: ${apiUrl}`);
+            
+            const res = await fetch(apiUrl, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -128,6 +138,7 @@ export default function Home() {
             });
             
             console.log('Risposta ricevuta:', res.status);
+            setDebugInfo(prev => prev + `\nRisposta move: ${res.status}`);
             
             if (!res.ok) {
               const errorText = await res.text();
@@ -250,7 +261,11 @@ export default function Home() {
       console.log('Invio richiesta join...');
       setDebugInfo(prev => prev + '\nInvio richiesta join...');
       
-      const res = await fetch('/api/join', {
+      const apiUrl = `${API_BASE_URL}/api/join`;
+      console.log('URL API join:', apiUrl);
+      setDebugInfo(prev => prev + `\nURL API join: ${apiUrl}`);
+      
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
