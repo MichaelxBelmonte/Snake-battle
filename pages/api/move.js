@@ -216,6 +216,9 @@ export default async function handler(req, res) {
       gameState.foodItems.push(generateRandomPosition(occupiedPositions));
     }
     
+    // Ottieni gli altri giocatori (escludi il giocatore corrente)
+    const otherPlayers = gameState.players.filter(p => p.id !== playerId);
+    
     // Configura Pusher
     const pusher = getPusherInstance();
     
@@ -225,11 +228,8 @@ export default async function handler(req, res) {
       player,
       foodItems: gameState.foodItems,
       hasEatenFood,
-      otherPlayers: gameState.players.filter(p => p.id !== playerId)
+      otherPlayers // Includi tutti gli altri giocatori nell'evento
     });
-    
-    // Ottieni gli altri giocatori (escludi il giocatore corrente)
-    const otherPlayers = gameState.players.filter(p => p.id !== playerId);
     
     return res.status(200).json({
       player,

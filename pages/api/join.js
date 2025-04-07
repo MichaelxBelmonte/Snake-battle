@@ -155,6 +155,9 @@ export default async function handler(req, res) {
             }
         }
         
+        // Ottieni gli altri giocatori (escludi il giocatore corrente)
+        const otherPlayers = gameState.players.filter(p => p.id !== player.id);
+        
         // Configura Pusher
         const pusher = getPusherInstance();
         
@@ -162,11 +165,8 @@ export default async function handler(req, res) {
         await pusher.trigger('snake-game', 'player-joined', {
             player,
             foodItems: gameState.foodItems,
-            otherPlayers: gameState.players.filter(p => p.id !== player.id)
+            otherPlayers // Includi tutti gli altri giocatori nell'evento
         });
-        
-        // Ottieni gli altri giocatori (escludi il giocatore corrente)
-        const otherPlayers = gameState.players.filter(p => p.id !== player.id);
         
         return res.status(200).json({
             player,

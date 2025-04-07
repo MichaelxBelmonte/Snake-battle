@@ -103,6 +103,11 @@ export default function Home() {
           if (data.foodItems) {
             setFoodItems(data.foodItems);
           }
+          
+          // Aggiorna la lista completa degli altri giocatori
+          if (data.otherPlayers) {
+            setOtherPlayers(data.otherPlayers);
+          }
         });
         
         channel.bind('player-moved', (data) => {
@@ -131,6 +136,11 @@ export default function Home() {
           // Aggiorna gli elementi cibo se necessario
           if (data.foodItems) {
             setFoodItems(data.foodItems);
+          }
+          
+          // Aggiorna la lista completa degli altri giocatori
+          if (data.otherPlayers) {
+            setOtherPlayers(data.otherPlayers);
           }
         });
         
@@ -551,7 +561,7 @@ export default function Home() {
         // Loop delle API
         apiLoopRef.current = setInterval(() => {
           updateWithServer();
-        }, 400); // Aggiorna con il server ogni 400ms (più frequente)
+        }, 300); // Aggiorna con il server ogni 300ms (ancora più frequente)
         
         return () => {
           console.log('Termine loop di gioco...');
