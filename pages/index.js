@@ -76,29 +76,47 @@ export default function Home() {
   useEffect(() => {
     if (!gameStarted) return;
 
+    console.log('Inizializzazione Pusher...');
+    
     // Inizializza Pusher
     const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
       cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
     });
+    
+    pusherRef.current = pusher;
 
     // Sottoscrivi al canale
     const channel = pusher.subscribe('snake-game');
 
     // Gestisci l'evento player-joined
     channel.bind('player-joined', (data) => {
-      console.log('Nuovo giocatore unito:', data);
+      console.log('Nuovo giocatore:', data.player?.id);
       if (data.player && data.player.id !== playerId) {
         setOtherPlayers(prevPlayers => {
-          const newPlayers = [...prevPlayers];
-          const existingIndex = newPlayers.findIndex(p => p.id === data.player.id);
-          if (existingIndex >= 0) {
-            newPlayers[existingIndex] = data.player;
+          // Crea una copia dell'array esistente
+          const updatedPlayers = [...prevPlayers];
+          // Cerca il giocatore nell'array esistente
+          const existingIndex = updatedPlayers.findIndex(p => p.id === data.player.id);
+          
+          if (existingIndex !== -1) {
+            // Aggiorna il giocatore esistente
+            updatedPlayers[existingIndex] = {
+              ...data.player,
+              lastUpdate: Date.now()
+            };
           } else {
-            newPlayers.push(data.player);
+            // Aggiungi il nuovo giocatore
+            updatedPlayers.push({
+              ...data.player,
+              lastUpdate: Date.now()
+            });
           }
-          return newPlayers;
+          
+          console.log(`Dopo player-joined: ${updatedPlayers.length} giocatori`);
+          return updatedPlayers;
         });
       }
+      
       if (data.foodItems) {
         setFoodItems(data.foodItems);
       }
@@ -107,35 +125,45 @@ export default function Home() {
     // Gestisci l'evento player-moved
     channel.bind('player-moved', (data) => {
       if (data.playerId !== playerId) {
+        console.log(`Movimento ricevuto da ${data.playerId}`);
+        
         setOtherPlayers(prevPlayers => {
-          // Trova il giocatore esistente
-          const existingPlayerIndex = prevPlayers.findIndex(p => p.id === data.playerId);
+          // Crea una copia dell'array esistente
           const updatedPlayers = [...prevPlayers];
+          // Cerca il giocatore
+          const existingIndex = updatedPlayers.findIndex(p => p.id === data.playerId);
           
-          if (existingPlayerIndex !== -1) {
-            // Aggiorna il giocatore esistente
-            updatedPlayers[existingPlayerIndex] = {
-              ...updatedPlayers[existingPlayerIndex],
-              ...data.player
+          if (existingIndex !== -1 && data.player) {
+            // Aggiorna il giocatore esistente preservando i dati importanti
+            updatedPlayers[existingIndex] = {
+              ...updatedPlayers[existingIndex],
+              ...data.player,
+              lastUpdate: Date.now()
             };
-          } else {
-            // Aggiungi il nuovo giocatore
-            updatedPlayers.push(data.player);
+          } else if (data.player) {
+            // Aggiungi un nuovo giocatore se non esiste
+            updatedPlayers.push({
+              ...data.player,
+              lastUpdate: Date.now()
+            });
           }
           
-          // Rimuovi i giocatori inattivi (più di 10 secondi senza aggiornamenti)
+          // Filtra giocatori inattivi (più di 10 secondi senza aggiornamenti)
           const now = Date.now();
-          return updatedPlayers.filter(p => now - p.lastUpdate < 10000);
+          const filteredPlayers = updatedPlayers.filter(p => now - p.lastUpdate < 10000);
+          
+          console.log(`Dopo player-moved: ${filteredPlayers.length} giocatori rimanenti`);
+          return filteredPlayers;
         });
       }
       
-      // Aggiorna il cibo se necessario
       if (data.foodItems) {
         setFoodItems(data.foodItems);
       }
     });
 
     return () => {
+      console.log('Disconnessione da Pusher');
       channel.unbind_all();
       channel.unsubscribe();
       pusher.disconnect();
@@ -239,7 +267,9 @@ export default function Home() {
           direction: directionRef.current,
           playerState: {
             ...playerState,
-            lastUpdate: Date.now()
+            lastUpdate: Date.now(),
+            name: playerName,
+            color: playerColor
           }
         }),
       });
@@ -250,6 +280,7 @@ export default function Home() {
       
       // Aggiorna lo stato del giocatore
       setPlayerState(data.player);
+      setScore(data.player.score);
       
       // Aggiorna il cibo
       if (data.foodItems) {
@@ -258,7 +289,11 @@ export default function Home() {
       
       // Aggiorna gli altri giocatori
       if (data.otherPlayers) {
-        setOtherPlayers(data.otherPlayers);
+        console.log(`Server: ricevuti ${data.otherPlayers.length} altri giocatori`);
+        setOtherPlayers(data.otherPlayers.map(player => ({
+          ...player,
+          lastUpdate: Date.now()
+        })));
       }
       
     } catch (error) {
@@ -320,7 +355,7 @@ export default function Home() {
         console.log('Canvas inizializzato:', canvas.width, 'x', canvas.height);
         
         // Funzione principale per disegnare il gioco
-        const drawGame = () => {
+        const renderFrame = () => {
           // Pulisci lo schermo
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           
@@ -338,19 +373,25 @@ export default function Home() {
           drawFood();
           
           // Disegna gli altri serpenti
-          otherPlayers.forEach(player => {
-            if (player && player.snake) {
-              drawSnake(player.snake, player.color, player.name);
-            }
-          });
+          if (otherPlayers && otherPlayers.length > 0) {
+            console.log(`Rendering ${otherPlayers.length} altri giocatori`);
+            otherPlayers.forEach(player => {
+              if (player && player.snake && player.color) {
+                drawSnake(player.snake, player.color, player.name || 'Giocatore');
+              }
+            });
+          }
           
           // Disegna il serpente del giocatore
           if (playerState && playerState.snake) {
-            drawSnake(playerState.snake, playerColor, playerName);
+            drawSnake(playerState.snake, playerColor, playerName || 'Tu');
           }
           
           // Disegna le informazioni di gioco
           drawScore();
+          
+          // Richiedi il prossimo frame
+          renderLoopRef.current = requestAnimationFrame(renderFrame);
         };
         
         // Disegna una griglia sottile
@@ -559,31 +600,31 @@ export default function Home() {
           ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
         };
         
-        // Esegui drawGame una volta subito all'inizio
-        drawGame();
+        // Avvia il ciclo di rendering
+        renderFrame();
         
-        // Loop di rendering a velocità ridotta
-        renderLoopRef.current = setInterval(() => {
+        // Loop di movimento locale a 15 FPS
+        const movementInterval = setInterval(() => {
           moveSnakeLocally(); // Movimento locale predittivo
-          drawGame();
-        }, 1000 / 15); // ~15 FPS per il movimento locale (più fluido)
+        }, 1000 / 15);
         
-        // Loop delle API
-        apiLoopRef.current = setInterval(() => {
+        // Loop delle API a 300ms
+        const apiInterval = setInterval(() => {
           updateWithServer();
-        }, 300); // Aggiorna con il server ogni 300ms (ancora più frequente)
+        }, 300);
         
         return () => {
           console.log('Termine loop di gioco...');
-          clearInterval(renderLoopRef.current);
-          clearInterval(apiLoopRef.current);
+          cancelAnimationFrame(renderLoopRef.current);
+          clearInterval(movementInterval);
+          clearInterval(apiInterval);
         };
       } catch (err) {
         console.error('Errore nel loop di gioco:', err);
         setError('Errore di gioco: ' + err.message);
       }
     }
-  }, [gameStarted, playerId, playerState, otherPlayers]);
+  }, [gameStarted, playerId, playerState]);
   
   // Gestisce gli input da tastiera
   useEffect(() => {

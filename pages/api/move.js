@@ -89,6 +89,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Dati richiesti mancanti' });
     }
     
+    console.log(`Movimento ricevuto da ${playerId}, direzione: ${direction}`);
+    
     // Recupera il giocatore dallo stato di gioco globale
     let player = gameState.players.find(p => p.id === playerId);
     
@@ -99,6 +101,7 @@ export default async function handler(req, res) {
         id: playerId,
         lastUpdate: Date.now()
       };
+      console.log(`Nuovo giocatore aggiunto: ${player.name || playerId}`);
       gameState.players.push(player);
     } else {
       // Aggiorna lo stato del giocatore esistente
@@ -143,6 +146,7 @@ export default async function handler(req, res) {
     
     // Controlla collisione con altri serpenti
     if (checkCollision(head, gameState.players, playerId)) {
+      console.log(`${player.name || playerId} ha avuto una collisione`);
       // Reset del serpente in caso di collisione (perdita)
       const randomPos = generateRandomPosition(
         gameState.players.flatMap(p => p.snake || []).concat(gameState.foodItems)
@@ -164,6 +168,7 @@ export default async function handler(req, res) {
         // Il serpente ha mangiato del cibo
         hasEatenFood = true;
         player.score += 10;
+        console.log(`${player.name || playerId} ha mangiato cibo: +10 punti`);
         
         // Aggiunge un nuovo segmento al serpente (non rimuove l'ultimo)
         player.snake = [head, ...player.snake];
@@ -186,9 +191,12 @@ export default async function handler(req, res) {
     
     // Pulisce giocatori inattivi (più di 10 secondi senza aggiornamenti)
     const now = Date.now();
-    gameState.players = gameState.players.filter(p => 
-      now - p.lastUpdate < 10000
-    );
+    const playersBeforeCleanup = gameState.players.length;
+    gameState.players = gameState.players.filter(p => now - p.lastUpdate < 10000);
+    
+    if (playersBeforeCleanup !== gameState.players.length) {
+      console.log(`Rimossi ${playersBeforeCleanup - gameState.players.length} giocatori inattivi`);
+    }
     
     // Assicura che ci siano sempre abbastanza elementi cibo
     while (gameState.foodItems.length < gameState.maxFood) {
@@ -201,6 +209,7 @@ export default async function handler(req, res) {
     
     // Ottieni gli altri giocatori (escludi il giocatore corrente)
     const otherPlayers = gameState.players.filter(p => p.id !== playerId);
+    console.log(`Inviando ${otherPlayers.length} altri giocatori nella risposta`);
     
     // Configura Pusher
     const pusher = getPusherInstance();
