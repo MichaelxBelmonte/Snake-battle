@@ -161,11 +161,15 @@ export default async function handler(req, res) {
             foodItems: gameState.foodItems
         });
         
+        // Ottieni gli altri giocatori (escludi il giocatore corrente)
+        const otherPlayers = gameState.players.filter(p => p.id !== playerId);
+        
         // Rispondi con i dati iniziali del gioco
         return res.status(200).json({
             playerId,
             player: newPlayer,
-            foodItems: gameState.foodItems
+            foodItems: gameState.foodItems,
+            otherPlayers // Includi tutti gli altri giocatori nella risposta
         });
     } catch (error) {
         console.error('Errore durante l\'elaborazione:', error);

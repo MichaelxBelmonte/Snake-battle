@@ -52,12 +52,10 @@ export default function Home() {
   
   // Stato locale del gioco
   const [playerState, setPlayerState] = useState(null);
-  const [foodItems, setFoodItems] = useState([{ x: 0, y: 0 }]); // Array di cibo invece di un solo elemento
+  const [foodItems, setFoodItems] = useState([{ x: 0, y: 0 }]); 
   const [otherPlayers, setOtherPlayers] = useState([]);
   const [playerId, setPlayerId] = useState(null);
   const [score, setScore] = useState(0);
-  const [debugInfo, setDebugInfo] = useState('');
-  const [lastApiUpdate, setLastApiUpdate] = useState(0);
   const [foodAnimation, setFoodAnimation] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
   
@@ -78,56 +76,26 @@ export default function Home() {
   useEffect(() => {
     if (gameStarted) {
       try {
-        console.log('Tentativo di connessione a Pusher...');
-        setDebugInfo(prev => prev + '\nTentativo di connessione a Pusher...');
-        
-        // Log delle variabili d'ambiente (solo per debug)
-        console.log('NEXT_PUBLIC_PUSHER_KEY:', process.env.NEXT_PUBLIC_PUSHER_KEY);
-        console.log('NEXT_PUBLIC_PUSHER_CLUSTER:', process.env.NEXT_PUBLIC_PUSHER_CLUSTER);
-        
-        if (!process.env.NEXT_PUBLIC_PUSHER_KEY || !process.env.NEXT_PUBLIC_PUSHER_CLUSTER) {
-          throw new Error('Variabili d\'ambiente Pusher mancanti');
-        }
-        
-        pusherRef.current = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-          cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER
+        const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
+          cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
         });
         
-        const channel = pusherRef.current.subscribe('snake-game');
+        const channel = pusher.subscribe('snake-game');
         
-        console.log('Connessione a Pusher riuscita, in ascolto di eventi...');
-        setDebugInfo(prev => prev + '\nConnessione a Pusher riuscita, in ascolto di eventi...');
+        console.log('Iscritto al canale Pusher:', channel.name);
         
         channel.bind('player-joined', (data) => {
           console.log('Evento player-joined ricevuto:', data);
-          setDebugInfo(prev => prev + '\nEvento player-joined ricevuto');
           
-          // Aggiungi il nuovo giocatore agli altri giocatori se non è l'utente corrente
+          // Aggiorna l'elenco degli altri giocatori
           if (data.newPlayer && data.newPlayer.id !== playerId) {
-            setOtherPlayers(prev => [...prev, data.newPlayer]);
-          }
-          
-          // Aggiorna gli elementi cibo se necessario
-          if (data.foodItems) {
-            setFoodItems(data.foodItems);
-          }
-        });
-        
-        channel.bind('player-moved', (data) => {
-          console.log('Evento player-moved ricevuto:', data);
-          
-          // Aggiorna la posizione degli altri giocatori
-          if (data.playerId && data.playerId !== playerId && data.player) {
             setOtherPlayers(prev => {
-              const newPlayers = [...prev];
-              const index = newPlayers.findIndex(p => p.id === data.playerId);
-              if (index !== -1) {
-                newPlayers[index] = data.player;
-              } else {
-                // Aggiungi il giocatore se non esiste
-                newPlayers.push(data.player);
+              // Verifica se il giocatore esiste già
+              const exists = prev.some(p => p.id === data.newPlayer.id);
+              if (!exists) {
+                return [...prev, data.newPlayer];
               }
-              return newPlayers;
+              return prev;
             });
           }
           
@@ -137,16 +105,39 @@ export default function Home() {
           }
         });
         
+        channel.bind('player-moved', (data) => {
+          // Aggiorna la posizione degli altri giocatori
+          if (data.playerId !== playerId && data.player) {
+            setOtherPlayers(prev => {
+              // Trova e aggiorna il giocatore specifico
+              return prev.map(p => {
+                if (p.id === data.playerId) {
+                  return data.player;
+                }
+                return p;
+              });
+            });
+          }
+          
+          // Aggiorna gli elementi cibo se necessario
+          if (data.foodItems) {
+            setFoodItems(data.foodItems);
+          }
+        });
+        
+        // Salva il riferimento a Pusher
+        pusherRef.current = pusher;
+        
+        // Cleanup
         return () => {
-          console.log('Disconnessione da Pusher...');
+          console.log('Chiusura connessione Pusher...');
           channel.unbind_all();
-          channel.unsubscribe();
-          pusherRef.current.disconnect();
+          pusher.unsubscribe('snake-game');
+          pusher.disconnect();
         };
       } catch (err) {
-        console.error('Errore durante l\'inizializzazione di Pusher:', err);
-        setDebugInfo(prev => prev + '\nErrore Pusher: ' + err.message);
-        setError('Errore durante l\'inizializzazione di Pusher: ' + err.message);
+        console.error('Errore nell\'inizializzazione di Pusher:', err);
+        setError('Errore di connessione: ' + err.message);
       }
     }
   }, [gameStarted, playerId]);
@@ -239,7 +230,7 @@ export default function Home() {
     if (!playerState || !playerId) return;
     
     try {
-      console.log('Invio richiesta di movimento...');
+      const API_BASE_URL = window.location.origin;
       
       const apiUrl = `${API_BASE_URL}/api/move`;
       
@@ -257,9 +248,6 @@ export default function Home() {
       });
       
       if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Errore API:', res.status, errorText);
-        setDebugInfo(prev => prev + `\nErrore API move: ${res.status} - ${errorText}`);
         throw new Error(`Errore API: ${res.status}`);
       }
       
@@ -271,11 +259,14 @@ export default function Home() {
         setFoodItems(data.foodItems);
       }
       setScore(data.player.score);
-      setLastApiUpdate(Date.now());
       
+      // Aggiorna la lista completa degli altri giocatori
+      if (data.otherPlayers) {
+        setOtherPlayers(data.otherPlayers.filter(p => p.id !== playerId));
+      }
     } catch (err) {
-      console.error('Errore durante l\'aggiornamento:', err);
-      setDebugInfo(prev => prev + '\nErrore aggiornamento: ' + err.message);
+      console.error('Errore di aggiornamento con il server:', err);
+      setError('Errore di comunicazione: ' + err.message);
     }
   };
   
@@ -283,8 +274,7 @@ export default function Home() {
   useEffect(() => {
     if (gameStarted && playerId && playerState) {
       try {
-        console.log('Inizializzazione del canvas...');
-        setDebugInfo(prev => prev + '\nInizializzazione del canvas...');
+        console.log('Avvio loop di gioco...');
         
         const canvas = canvasRef.current;
         if (!canvas) {
@@ -300,86 +290,173 @@ export default function Home() {
         
         console.log('Canvas inizializzato:', canvas.width, 'x', canvas.height);
         
-        // Funzione per disegnare il serpente migliorata
-        const drawSnake = (snake, color) => {
-          if (!snake || snake.length === 0) return;
+        // Funzione principale per disegnare il gioco
+        const drawGame = () => {
+          // Pulisci lo schermo
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
           
-          // Disegna il corpo
-          for (let i = snake.length - 1; i >= 0; i--) {
-            const segment = snake[i];
-            const isHead = i === 0;
-            
-            if (isHead) {
-              // Testa del serpente - più scura con occhi
-              ctx.fillStyle = darkenColor(color, 15);
-              ctx.beginPath();
-              ctx.arc(segment.x + gridSize/2, segment.y + gridSize/2, gridSize/2, 0, Math.PI * 2);
-              ctx.fill();
-              
-              // Direzione della testa (per gli occhi)
-              let eyeX1 = 0, eyeY1 = 0, eyeX2 = 0, eyeY2 = 0;
-              
-              // Posiziona gli occhi in base alla direzione
-              const direction = snake.length > 1 ? 
-                getDirection(snake[0], snake[1]) : 
-                lastDirectionRef.current;
-                
-              if (direction === 'right' || direction === 'left') {
-                // Occhi orizzontali
-                eyeX1 = segment.x + (direction === 'right' ? gridSize * 0.7 : gridSize * 0.3);
-                eyeY1 = segment.y + gridSize * 0.3;
-                eyeX2 = segment.x + (direction === 'right' ? gridSize * 0.7 : gridSize * 0.3);
-                eyeY2 = segment.y + gridSize * 0.7;
-              } else {
-                // Occhi verticali
-                eyeX1 = segment.x + gridSize * 0.3;
-                eyeY1 = segment.y + (direction === 'down' ? gridSize * 0.7 : gridSize * 0.3);
-                eyeX2 = segment.x + gridSize * 0.7;
-                eyeY2 = segment.y + (direction === 'down' ? gridSize * 0.7 : gridSize * 0.3);
-              }
-              
-              // Occhi bianchi
-              ctx.fillStyle = 'white';
-              ctx.beginPath();
-              ctx.arc(eyeX1, eyeY1, gridSize/6, 0, Math.PI * 2);
-              ctx.fill();
-              ctx.beginPath();
-              ctx.arc(eyeX2, eyeY2, gridSize/6, 0, Math.PI * 2);
-              ctx.fill();
-              
-              // Pupille nere
-              ctx.fillStyle = 'black';
-              ctx.beginPath();
-              ctx.arc(eyeX1, eyeY1, gridSize/12, 0, Math.PI * 2);
-              ctx.fill();
-              ctx.beginPath();
-              ctx.arc(eyeX2, eyeY2, gridSize/12, 0, Math.PI * 2);
-              ctx.fill();
-            } else {
-              // Corpo del serpente con effetto gradiente
-              const opacity = 1 - (i / snake.length) * 0.6;
-              ctx.fillStyle = adjustOpacity(color, opacity);
-              
-              // Usa cerchi per segmenti del corpo
-              ctx.beginPath();
-              ctx.arc(segment.x + gridSize/2, segment.y + gridSize/2, (gridSize/2) - 1, 0, Math.PI * 2);
-              ctx.fill();
-              
-              // Effetto highlight
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-              ctx.beginPath();
-              ctx.arc(segment.x + gridSize/2 - 2, segment.y + gridSize/2 - 2, gridSize/6, 0, Math.PI * 2);
-              ctx.fill();
+          // Sfondo gradiente
+          const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+          gradient.addColorStop(0, '#121212');
+          gradient.addColorStop(1, '#1e3a8a');
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Disegna una griglia sottile
+          drawGrid();
+          
+          // Disegna il cibo
+          drawFood();
+          
+          // Disegna gli altri serpenti
+          otherPlayers.forEach(player => {
+            if (player && player.snake) {
+              drawSnake(player.snake, player.color, player.name);
             }
+          });
+          
+          // Disegna il serpente del giocatore
+          if (playerState && playerState.snake) {
+            drawSnake(playerState.snake, playerColor, playerName);
+          }
+          
+          // Disegna le informazioni di gioco
+          drawScore();
+        };
+        
+        // Disegna una griglia sottile
+        const drawGrid = () => {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+          ctx.lineWidth = 0.5;
+          
+          for (let x = 0; x <= canvas.width; x += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+          }
+          
+          for (let y = 0; y <= canvas.height; y += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
           }
         };
         
-        // Funzione per determinare la direzione tra due segmenti
-        const getDirection = (segment1, segment2) => {
-          if (segment1.x < segment2.x) return 'left';
-          if (segment1.x > segment2.x) return 'right';
-          if (segment1.y < segment2.y) return 'up';
-          return 'down';
+        // Funzione per disegnare il serpente
+        const drawSnake = (snake, color, playerName) => {
+          if (!snake || !snake.length) return;
+          
+          // Determina la direzione della testa
+          let direction = 'right';
+          if (snake.length > 1) {
+            if (snake[0].x < snake[1].x) direction = 'left';
+            else if (snake[0].x > snake[1].x) direction = 'right';
+            else if (snake[0].y < snake[1].y) direction = 'up';
+            else if (snake[0].y > snake[1].y) direction = 'down';
+          }
+          
+          // Disegna il nome del giocatore sopra la testa del serpente
+          ctx.fillStyle = 'white';
+          ctx.font = '12px Poppins, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(playerName || 'Giocatore', snake[0].x + gridSize / 2, snake[0].y - 5);
+          
+          // Disegna ogni segmento del serpente
+          snake.forEach((segment, index) => {
+            const isHead = index === 0;
+            
+            // Colore base e colore più scuro per effetto 3D
+            const baseColor = color;
+            const darkColor = darkenColor(baseColor, 20);
+            
+            // Raggio per i cerchi
+            const radius = isHead ? gridSize / 2 : gridSize / 2 - 1;
+            
+            // Disegna il corpo come cerchi
+            ctx.fillStyle = baseColor;
+            ctx.beginPath();
+            ctx.arc(
+              segment.x + gridSize / 2, 
+              segment.y + gridSize / 2, 
+              radius, 
+              0, 
+              Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Effetto luminoso
+            const grd = ctx.createRadialGradient(
+              segment.x + gridSize / 2 - 3, 
+              segment.y + gridSize / 2 - 3, 
+              0, 
+              segment.x + gridSize / 2,
+              segment.y + gridSize / 2,
+              radius
+            );
+            grd.addColorStop(0, adjustOpacity(baseColor, 0.7));
+            grd.addColorStop(1, adjustOpacity(darkColor, 0.1));
+            
+            ctx.fillStyle = grd;
+            ctx.beginPath();
+            ctx.arc(
+              segment.x + gridSize / 2, 
+              segment.y + gridSize / 2, 
+              radius, 
+              0, 
+              Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Disegna gli occhi se è la testa
+            if (isHead) {
+              ctx.fillStyle = 'white';
+              
+              // Posizione degli occhi in base alla direzione
+              let eyeX1, eyeY1, eyeX2, eyeY2;
+              
+              switch (direction) {
+                case 'up':
+                  eyeX1 = segment.x + gridSize / 3;
+                  eyeY1 = segment.y + gridSize / 3;
+                  eyeX2 = segment.x + gridSize * 2 / 3;
+                  eyeY2 = segment.y + gridSize / 3;
+                  break;
+                case 'down':
+                  eyeX1 = segment.x + gridSize / 3;
+                  eyeY1 = segment.y + gridSize * 2 / 3;
+                  eyeX2 = segment.x + gridSize * 2 / 3;
+                  eyeY2 = segment.y + gridSize * 2 / 3;
+                  break;
+                case 'left':
+                  eyeX1 = segment.x + gridSize / 3;
+                  eyeY1 = segment.y + gridSize / 3;
+                  eyeX2 = segment.x + gridSize / 3;
+                  eyeY2 = segment.y + gridSize * 2 / 3;
+                  break;
+                case 'right':
+                  eyeX1 = segment.x + gridSize * 2 / 3;
+                  eyeY1 = segment.y + gridSize / 3;
+                  eyeX2 = segment.x + gridSize * 2 / 3;
+                  eyeY2 = segment.y + gridSize * 2 / 3;
+                  break;
+              }
+              
+              // Occhi
+              ctx.beginPath();
+              ctx.arc(eyeX1, eyeY1, 2, 0, Math.PI * 2);
+              ctx.arc(eyeX2, eyeY2, 2, 0, Math.PI * 2);
+              ctx.fill();
+              
+              // Pupille
+              ctx.fillStyle = 'black';
+              ctx.beginPath();
+              ctx.arc(eyeX1, eyeY1, 1, 0, Math.PI * 2);
+              ctx.arc(eyeX2, eyeY2, 1, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          });
         };
         
         // Funzione per disegnare il cibo con animazione
@@ -444,88 +521,14 @@ export default function Home() {
         
         // Funzione per disegnare il punteggio
         const drawScore = () => {
-          ctx.fillStyle = '#fff';
-          ctx.font = 'bold 20px Poppins';
+          ctx.fillStyle = 'white';
+          ctx.font = 'bold 16px Poppins, sans-serif';
           ctx.textAlign = 'left';
-          ctx.fillText(`Punteggio: ${score}`, 20, 30);
+          ctx.fillText(`Punteggio: ${score}`, 10, 25);
           
-          // Nome del giocatore
-          if (playerState && playerState.name) {
-            ctx.fillStyle = playerState.color;
-            ctx.textAlign = 'right';
-            ctx.fillText(playerState.name, canvas.width - 20, 30);
-          }
+          ctx.textAlign = 'right';
+          ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
         };
-        
-        // Funzione per disegnare la griglia
-        const drawGrid = () => {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-          ctx.lineWidth = 1;
-          
-          // Righe orizzontali
-          for (let y = 0; y <= canvas.height; y += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
-            ctx.stroke();
-          }
-          
-          // Righe verticali
-          for (let x = 0; x <= canvas.width; x += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvas.height);
-            ctx.stroke();
-          }
-        };
-        
-        // Funzione per disegnare il gioco
-        const drawGame = () => {
-          // Pulisci il canvas
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          
-          // Disegna sfondo gradiente
-          const grd = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-          grd.addColorStop(0, "#1e293b");
-          grd.addColorStop(1, "#0f172a");
-          ctx.fillStyle = grd;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Disegna la griglia
-          drawGrid();
-          
-          // Disegna gli altri giocatori
-          otherPlayers.forEach(player => {
-            if (player && player.snake) {
-              drawSnake(player.snake, player.color);
-            }
-          });
-          
-          // Disegna il giocatore corrente
-          if (playerState && playerState.snake) {
-            drawSnake(playerState.snake, playerState.color);
-          }
-          
-          // Disegna il cibo
-          drawFood();
-          
-          // Disegna il punteggio
-          drawScore();
-          
-          // Disegna i nomi degli altri giocatori sopra le loro teste
-          otherPlayers.forEach(player => {
-            if (player && player.snake && player.snake.length > 0) {
-              const head = player.snake[0];
-              ctx.fillStyle = player.color;
-              ctx.font = '14px Poppins';
-              ctx.textAlign = 'center';
-              ctx.fillText(player.name, head.x + gridSize/2, head.y - 5);
-            }
-          });
-        };
-        
-        console.log('Avvio loop di gioco...');
-        setDebugInfo(prev => prev + '\nAvvio loop di gioco...');
         
         // Esegui drawGame una volta subito all'inizio
         drawGame();
@@ -547,9 +550,8 @@ export default function Home() {
           clearInterval(apiLoopRef.current);
         };
       } catch (err) {
-        console.error('Errore durante l\'inizializzazione del gioco:', err);
-        setDebugInfo(prev => prev + '\nErrore inizializzazione: ' + err.message);
-        setError('Errore durante l\'inizializzazione del gioco: ' + err.message);
+        console.error('Errore nel loop di gioco:', err);
+        setError('Errore di gioco: ' + err.message);
       }
     }
   }, [gameStarted, playerId, playerState]);
@@ -717,15 +719,12 @@ export default function Home() {
     e.preventDefault();
     console.clear();  // Pulisci la console per avere log puliti
     console.log('Tentativo di avvio gioco...');
-    setDebugInfo('Tentativo di avvio gioco...');
     
     try {
       console.log('Invio richiesta join...');
-      setDebugInfo(prev => prev + '\nInvio richiesta join...');
       
       const apiUrl = `${API_BASE_URL}/api/join`;
       console.log('URL API join:', apiUrl);
-      setDebugInfo(prev => prev + `\nURL API join: ${apiUrl}`);
       
       const res = await fetch(apiUrl, {
         method: 'POST',
@@ -739,18 +738,15 @@ export default function Home() {
       });
       
       console.log('Risposta ricevuta:', res.status);
-      setDebugInfo(prev => prev + `\nRisposta ricevuta: ${res.status}`);
       
       if (!res.ok) {
         const errorText = await res.text();
         console.error('Errore API:', res.status, errorText);
-        setDebugInfo(prev => prev + `\nErrore API join: ${res.status} - ${errorText}`);
         throw new Error(`Errore API: ${res.status}`);
       }
       
       const data = await res.json();
       console.log('Dati ricevuti:', data);
-      setDebugInfo(prev => prev + '\nDati ricevuti con successo');
       
       // Imposta lo stato iniziale dal server
       setPlayerId(data.playerId);
@@ -766,10 +762,8 @@ export default function Home() {
       setError('');
       
       console.log('Gioco avviato con successo');
-      setDebugInfo(prev => prev + '\nGioco avviato con successo');
     } catch (err) {
       console.error('Errore durante l\'avvio del gioco:', err);
-      setDebugInfo(prev => prev + '\nErrore avvio: ' + err.message);
       setError('Errore durante l\'avvio del gioco: ' + err.message);
     }
   };
@@ -824,9 +818,11 @@ export default function Home() {
           <canvas ref={canvasRef} id="gameCanvas"></canvas>
           
           {isMobile && (
-            <div className="joystick-container" ref={joystickRef}>
-              <div className="joystick-base">
-                <div className="joystick-stick"></div>
+            <div className="controls-container">
+              <div className="joystick-container" ref={joystickRef}>
+                <div className="joystick-base">
+                  <div className="joystick-stick"></div>
+                </div>
               </div>
             </div>
           )}
@@ -838,18 +834,12 @@ export default function Home() {
             </div>
             <div className="controls">
               {isMobile ? (
-                <p>Usa il joystick o fai swipe per muovere il serpente</p>
+                <p>Usa il joystick per muovere il serpente</p>
               ) : (
                 <p>Usa le frecce direzionali ↑ ↓ ← → per muovere il serpente</p>
               )}
             </div>
             {error && <p className="error">{error}</p>}
-          </div>
-          
-          {/* Debug panel */}
-          <div className="debug-panel">
-            <h3>Debug Info</h3>
-            <pre>{debugInfo}</pre>
           </div>
         </div>
       )}
@@ -883,11 +873,19 @@ export default function Home() {
           object-fit: contain;
         }
         
+        .controls-container {
+          width: 100%;
+          display: flex;
+          justify-content: center;
+          margin-top: 1rem;
+          background-color: rgba(0, 0, 0, 0.3);
+          border-radius: 15px;
+          padding: 15px;
+        }
+        
         .joystick-container {
-          position: fixed;
-          bottom: 30px;
-          left: 30px;
-          z-index: 100;
+          position: relative;
+          margin: 0 auto;
           touch-action: none;
         }
         
@@ -1029,9 +1027,8 @@ export default function Home() {
             aspect-ratio: 4/3;
           }
           
-          .joystick-container {
-            bottom: 20px;
-            left: 20px;
+          .controls-container {
+            padding: 10px;
           }
           
           .joystick-base {

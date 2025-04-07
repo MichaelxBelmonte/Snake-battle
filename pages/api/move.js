@@ -67,6 +67,17 @@ let gameState = {
 };
 
 export default async function handler(req, res) {
+  // Abilita CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Gestisci la richiesta OPTIONS per CORS
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Metodo non consentito' });
   }
@@ -216,9 +227,13 @@ export default async function handler(req, res) {
       gameState.foodItems.push(generateRandomPosition(occupiedPositions));
     }
     
+    // Ottieni gli altri giocatori (escludi il giocatore corrente)
+    const otherPlayers = gameState.players.filter(p => p.id !== playerId);
+    
     return res.status(200).json({
       player,
-      foodItems: gameState.foodItems
+      foodItems: gameState.foodItems,
+      otherPlayers // Includi tutti gli altri giocatori nella risposta
     });
     
   } catch (error) {
