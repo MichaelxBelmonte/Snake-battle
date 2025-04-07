@@ -741,8 +741,8 @@ export default function Home() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: playerName,
-          color: playerColor
+          playerName: playerName,
+          playerColor: playerColor
         }),
       });
       
@@ -758,7 +758,7 @@ export default function Home() {
       console.log('Dati ricevuti:', data);
       
       // Imposta lo stato iniziale dal server
-      setPlayerId(data.playerId);
+      setPlayerId(data.player.id);
       setPlayerState(data.player);
       if (data.foodItems) {
         setFoodItems(data.foodItems);
