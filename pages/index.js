@@ -72,11 +72,14 @@ export default function Home() {
     setIsMobile(isMobileDevice());
   }, []);
   
-  // Inizializza Pusher
+  // Inizializza Pusher e gestisce gli eventi
   useEffect(() => {
-    if (!gameStarted) return;
+    if (!gameStarted || !playerId) return;
 
-    console.log('Inizializzazione Pusher...');
+    console.log('Inizializzazione Pusher e configurazione gioco...');
+    
+    // Pulisci i giocatori precedenti
+    setOtherPlayers([]);
     
     // Inizializza Pusher
     const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
@@ -91,31 +94,10 @@ export default function Home() {
     // Gestisci l'evento player-joined
     channel.bind('player-joined', (data) => {
       console.log('Nuovo giocatore:', data.player?.id);
-      if (data.player && data.player.id !== playerId) {
-        setOtherPlayers(prevPlayers => {
-          // Crea una copia dell'array esistente
-          const updatedPlayers = [...prevPlayers];
-          // Cerca il giocatore nell'array esistente
-          const existingIndex = updatedPlayers.findIndex(p => p.id === data.player.id);
-          
-          if (existingIndex !== -1) {
-            // Aggiorna il giocatore esistente
-            updatedPlayers[existingIndex] = {
-              ...data.player,
-              lastUpdate: Date.now()
-            };
-          } else {
-            // Aggiungi il nuovo giocatore
-            updatedPlayers.push({
-              ...data.player,
-              lastUpdate: Date.now()
-            });
-          }
-          
-          console.log(`Dopo player-joined: ${updatedPlayers.length} giocatori`);
-          return updatedPlayers;
-        });
-      }
+      setOtherPlayers(prevPlayers => {
+        // Crea un nuovo array per forzare il re-render
+        return [...prevPlayers.filter(p => p.id !== data.player.id), data.player];
+      });
       
       if (data.foodItems) {
         setFoodItems(data.foodItems);
@@ -125,35 +107,14 @@ export default function Home() {
     // Gestisci l'evento player-moved
     channel.bind('player-moved', (data) => {
       if (data.playerId !== playerId) {
-        console.log(`Movimento ricevuto da ${data.playerId}`);
-        
         setOtherPlayers(prevPlayers => {
-          // Crea una copia dell'array esistente
-          const updatedPlayers = [...prevPlayers];
-          // Cerca il giocatore
-          const existingIndex = updatedPlayers.findIndex(p => p.id === data.playerId);
-          
-          if (existingIndex !== -1 && data.player) {
-            // Aggiorna il giocatore esistente preservando i dati importanti
-            updatedPlayers[existingIndex] = {
-              ...updatedPlayers[existingIndex],
-              ...data.player,
-              lastUpdate: Date.now()
-            };
-          } else if (data.player) {
-            // Aggiungi un nuovo giocatore se non esiste
-            updatedPlayers.push({
-              ...data.player,
-              lastUpdate: Date.now()
-            });
+          // Rimuovi il giocatore se già presente
+          const filtered = prevPlayers.filter(p => p.id !== data.playerId);
+          // Aggiungi il giocatore con i dati aggiornati
+          if (data.player) {
+            return [...filtered, data.player];
           }
-          
-          // Filtra giocatori inattivi (più di 10 secondi senza aggiornamenti)
-          const now = Date.now();
-          const filteredPlayers = updatedPlayers.filter(p => now - p.lastUpdate < 10000);
-          
-          console.log(`Dopo player-moved: ${filteredPlayers.length} giocatori rimanenti`);
-          return filteredPlayers;
+          return filtered;
         });
       }
       
@@ -162,15 +123,272 @@ export default function Home() {
       }
     });
 
+    // Configurazione iniziale del gioco
+    const initGame = async () => {
+      try {
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          throw new Error('Canvas non trovato');
+        }
+        
+        // Imposta le dimensioni del canvas
+        canvas.width = 800;
+        canvas.height = 600;
+        
+        // Avvia il ciclo di gioco con rendering
+        startGameLoop();
+      } catch (err) {
+        console.error('Errore inizializzazione:', err);
+        setError('Errore inizializzazione: ' + err.message);
+      }
+    };
+    
+    // Avvia il gioco
+    initGame();
+    
     return () => {
-      console.log('Disconnessione da Pusher');
+      console.log('Pulizia e disconnessione...');
+      // Pulizia quando il componente viene smontato
+      cleanupGame();
+      
+      // Disconnessione da Pusher
       channel.unbind_all();
       channel.unsubscribe();
       pusher.disconnect();
     };
   }, [gameStarted, playerId]);
   
-  // Funzione di movimento locale predittivo (più fluido)
+  // Funzione per avviare il ciclo di gioco
+  const startGameLoop = () => {
+    // Loop di rendering
+    const renderInterval = setInterval(() => {
+      renderGame();
+    }, 1000 / 60); // 60 FPS
+    
+    // Loop di movimento locale
+    const moveInterval = setInterval(() => {
+      moveSnakeLocally();
+    }, 1000 / 15); // ~15 FPS
+    
+    // Loop di comunicazione con il server
+    const serverInterval = setInterval(() => {
+      updateWithServer();
+    }, 200); // Aggiorna ogni 200ms
+    
+    // Salva i riferimenti per la pulizia
+    renderLoopRef.current = renderInterval;
+    apiLoopRef.current = serverInterval;
+    
+    // Aggiungi anche il moveInterval per la pulizia
+    window.moveInterval = moveInterval;
+  };
+  
+  // Funzione di pulizia
+  const cleanupGame = () => {
+    if (renderLoopRef.current) clearInterval(renderLoopRef.current);
+    if (apiLoopRef.current) clearInterval(apiLoopRef.current);
+    if (window.moveInterval) clearInterval(window.moveInterval);
+  };
+  
+  // Funzione di rendering del gioco
+  const renderGame = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Sfondo
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#121212');
+    gradient.addColorStop(1, '#1e3a8a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Disegna griglia
+    drawGrid(ctx);
+    
+    // Disegna il cibo
+    drawFood(ctx);
+    
+    // Disegna gli altri serpenti
+    if (otherPlayers && otherPlayers.length > 0) {
+      console.log(`Rendering ${otherPlayers.length} altri giocatori`);
+      otherPlayers.forEach(player => {
+        if (player && player.snake && player.color) {
+          drawSnake(ctx, player.snake, player.color, player.name || 'Giocatore');
+        }
+      });
+    }
+    
+    // Disegna il serpente del giocatore
+    if (playerState && playerState.snake) {
+      drawSnake(ctx, playerState.snake, playerColor, playerName || 'Tu');
+    }
+    
+    // Disegna punteggio
+    drawScore(ctx);
+  };
+  
+  // Funzione per disegnare la griglia
+  const drawGrid = (ctx) => {
+    const gridSize = 20;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 0.5;
+    
+    for (let x = 0; x <= 800; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 600);
+      ctx.stroke();
+    }
+    
+    for (let y = 0; y <= 600; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(800, y);
+      ctx.stroke();
+    }
+  };
+  
+  // Funzione per disegnare il serpente
+  const drawSnake = (ctx, snake, color, name) => {
+    if (!snake || !snake.length) return;
+    
+    const gridSize = 20;
+    
+    // Determina la direzione della testa
+    let direction = 'right';
+    if (snake.length > 1) {
+      if (snake[0].x < snake[1].x) direction = 'left';
+      else if (snake[0].x > snake[1].x) direction = 'right';
+      else if (snake[0].y < snake[1].y) direction = 'up';
+      else if (snake[0].y > snake[1].y) direction = 'down';
+    }
+    
+    // Disegna il nome sopra la testa
+    ctx.fillStyle = 'white';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(name, snake[0].x + gridSize/2, snake[0].y - 5);
+    
+    // Disegna ogni segmento
+    snake.forEach((segment, index) => {
+      const isHead = index === 0;
+      const radius = isHead ? gridSize/2 : gridSize/2 - 1;
+      
+      // Cerchio base
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(
+        segment.x + gridSize/2,
+        segment.y + gridSize/2,
+        radius,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      
+      // Effetto luminoso
+      if (isHead) {
+        // Occhi
+        ctx.fillStyle = 'white';
+        let eyeX1, eyeY1, eyeX2, eyeY2;
+        
+        switch(direction) {
+          case 'up':
+            eyeX1 = segment.x + gridSize/3;
+            eyeY1 = segment.y + gridSize/3;
+            eyeX2 = segment.x + gridSize*2/3;
+            eyeY2 = segment.y + gridSize/3;
+            break;
+          case 'down':
+            eyeX1 = segment.x + gridSize/3;
+            eyeY1 = segment.y + gridSize*2/3;
+            eyeX2 = segment.x + gridSize*2/3;
+            eyeY2 = segment.y + gridSize*2/3;
+            break;
+          case 'left':
+            eyeX1 = segment.x + gridSize/3;
+            eyeY1 = segment.y + gridSize/3;
+            eyeX2 = segment.x + gridSize/3;
+            eyeY2 = segment.y + gridSize*2/3;
+            break;
+          case 'right':
+            eyeX1 = segment.x + gridSize*2/3;
+            eyeY1 = segment.y + gridSize/3;
+            eyeX2 = segment.x + gridSize*2/3;
+            eyeY2 = segment.y + gridSize*2/3;
+            break;
+        }
+        
+        ctx.beginPath();
+        ctx.arc(eyeX1, eyeY1, 2, 0, Math.PI * 2);
+        ctx.arc(eyeX2, eyeY2, 2, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Pupille
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.arc(eyeX1, eyeY1, 1, 0, Math.PI * 2);
+        ctx.arc(eyeX2, eyeY2, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  };
+  
+  // Funzione per disegnare il cibo
+  const drawFood = (ctx) => {
+    const gridSize = 20;
+    
+    foodItems.forEach(food => {
+      // Mela
+      ctx.fillStyle = '#e73c3e';
+      ctx.beginPath();
+      ctx.arc(
+        food.x + gridSize/2,
+        food.y + gridSize/2,
+        gridSize/2 - 2,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      
+      // Picciolo
+      ctx.fillStyle = '#7d4e11';
+      ctx.fillRect(
+        food.x + gridSize/2 - 1,
+        food.y + 2,
+        2,
+        5
+      );
+      
+      // Brillantezza
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.beginPath();
+      ctx.arc(
+        food.x + gridSize/3,
+        food.y + gridSize/3,
+        gridSize/6,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+    });
+  };
+  
+  // Funzione per disegnare il punteggio
+  const drawScore = (ctx) => {
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Punteggio: ${score}`, 10, 25);
+    
+    ctx.textAlign = 'right';
+    ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, 790, 25);
+  };
+  
+  // Funzione di movimento locale predittivo
   const moveSnakeLocally = () => {
     if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
     
@@ -199,62 +417,18 @@ export default function Home() {
         break;
     }
     
-    const newSnake = [head, ...playerState.snake.slice(0, -1)];
-    
-    // Verifica collisione con altri serpenti
-    const hasCollision = checkCollision(head, newSnake, otherPlayers);
-    if (hasCollision) {
-      console.log("Collisione rilevata!");
-      return;
-    }
-    
-    // Controlla se ha mangiato il cibo
-    const eatenFoodIndex = foodItems.findIndex(food => head.x === food.x && head.y === food.y);
-    
-    if (eatenFoodIndex !== -1) {
-      // Non rimuoviamo il cibo localmente, aspettiamo la conferma dal server
-      setPlayerState(prev => ({
-        ...prev,
-        snake: [head, ...prev.snake],
-        score: prev.score + 10
-      }));
-      setScore(prev => prev + 10);
-    } else {
-      setPlayerState(prev => ({
-        ...prev,
-        snake: newSnake
-      }));
-    }
+    // Semplifica: aggiorna solo la posizione localmente
+    setPlayerState(prev => ({
+      ...prev,
+      snake: [head, ...prev.snake.slice(0, -1)]
+    }));
     
     lastDirectionRef.current = directionRef.current;
   };
   
-  // Funzione per verificare le collisioni
-  const checkCollision = (head, mySnake, others) => {
-    // Collisione con se stesso (esclusa la testa)
-    for (let i = 1; i < mySnake.length; i++) {
-      if (head.x === mySnake[i].x && head.y === mySnake[i].y) {
-        return true;
-      }
-    }
-    
-    // Collisione con altri serpenti
-    for (const player of others) {
-      if (!player.snake) continue;
-      
-      for (const segment of player.snake) {
-        if (head.x === segment.x && head.y === segment.y) {
-          return true;
-        }
-      }
-    }
-    
-    return false;
-  };
-  
   // Funzione di aggiornamento con il server
   const updateWithServer = async () => {
-    if (!playerState || !gameStarted) return;
+    if (!playerState || !gameStarted || !playerId) return;
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/move`, {
@@ -290,341 +464,13 @@ export default function Home() {
       // Aggiorna gli altri giocatori
       if (data.otherPlayers) {
         console.log(`Server: ricevuti ${data.otherPlayers.length} altri giocatori`);
-        setOtherPlayers(data.otherPlayers.map(player => ({
-          ...player,
-          lastUpdate: Date.now()
-        })));
+        setOtherPlayers(data.otherPlayers);
       }
       
     } catch (error) {
       console.error('Errore durante l\'aggiornamento:', error);
     }
   };
-  
-  // Funzione di rendering del gioco
-  const drawGame = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Disegna la griglia
-    drawGrid();
-    
-    // Disegna il cibo
-    drawFood();
-    
-    // Disegna gli altri giocatori
-    otherPlayers.forEach(player => {
-      if (player && player.snake && player.color) {
-        drawSnake(player.snake, player.color, player.name || 'Giocatore');
-      }
-    });
-    
-    // Disegna il serpente del giocatore
-    if (playerState && playerState.snake) {
-      drawSnake(playerState.snake, playerColor, playerName || 'Tu');
-    }
-    
-    // Disegna il punteggio
-    drawScore();
-    
-    // Richiedi il prossimo frame
-    renderLoopRef.current = requestAnimationFrame(drawGame);
-  };
-  
-  // Gestisce il loop di gioco con rendering separato dalle API
-  useEffect(() => {
-    if (gameStarted && playerId && playerState) {
-      try {
-        console.log('Avvio loop di gioco...');
-        
-        const canvas = canvasRef.current;
-        if (!canvas) {
-          throw new Error('Canvas non trovato');
-        }
-        
-        const ctx = canvas.getContext('2d');
-        const gridSize = 20;
-        
-        // Imposta le dimensioni del canvas più grandi
-        canvas.width = 800;
-        canvas.height = 600;
-        
-        console.log('Canvas inizializzato:', canvas.width, 'x', canvas.height);
-        
-        // Funzione principale per disegnare il gioco
-        const renderFrame = () => {
-          // Pulisci lo schermo
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          
-          // Sfondo gradiente
-          const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-          gradient.addColorStop(0, '#121212');
-          gradient.addColorStop(1, '#1e3a8a');
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Disegna una griglia sottile
-          drawGrid();
-          
-          // Disegna il cibo
-          drawFood();
-          
-          // Disegna gli altri serpenti
-          if (otherPlayers && otherPlayers.length > 0) {
-            console.log(`Rendering ${otherPlayers.length} altri giocatori`);
-            otherPlayers.forEach(player => {
-              if (player && player.snake && player.color) {
-                drawSnake(player.snake, player.color, player.name || 'Giocatore');
-              }
-            });
-          }
-          
-          // Disegna il serpente del giocatore
-          if (playerState && playerState.snake) {
-            drawSnake(playerState.snake, playerColor, playerName || 'Tu');
-          }
-          
-          // Disegna le informazioni di gioco
-          drawScore();
-          
-          // Richiedi il prossimo frame
-          renderLoopRef.current = requestAnimationFrame(renderFrame);
-        };
-        
-        // Disegna una griglia sottile
-        const drawGrid = () => {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-          ctx.lineWidth = 0.5;
-          
-          for (let x = 0; x <= canvas.width; x += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvas.height);
-            ctx.stroke();
-          }
-          
-          for (let y = 0; y <= canvas.height; y += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
-            ctx.stroke();
-          }
-        };
-        
-        // Funzione per disegnare il serpente
-        const drawSnake = (snake, color, playerName) => {
-          if (!snake || !snake.length) return;
-          
-          // Determina la direzione della testa
-          let direction = 'right';
-          if (snake.length > 1) {
-            if (snake[0].x < snake[1].x) direction = 'left';
-            else if (snake[0].x > snake[1].x) direction = 'right';
-            else if (snake[0].y < snake[1].y) direction = 'up';
-            else if (snake[0].y > snake[1].y) direction = 'down';
-          }
-          
-          // Disegna il nome del giocatore sopra la testa del serpente
-          ctx.fillStyle = 'white';
-          ctx.font = '12px Poppins, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(playerName || 'Giocatore', snake[0].x + gridSize / 2, snake[0].y - 5);
-          
-          // Disegna ogni segmento del serpente
-          snake.forEach((segment, index) => {
-            const isHead = index === 0;
-            
-            // Colore base e colore più scuro per effetto 3D
-            const baseColor = color;
-            const darkColor = darkenColor(baseColor, 20);
-            
-            // Raggio per i cerchi
-            const radius = isHead ? gridSize / 2 : gridSize / 2 - 1;
-            
-            // Disegna il corpo come cerchi
-            ctx.fillStyle = baseColor;
-            ctx.beginPath();
-            ctx.arc(
-              segment.x + gridSize / 2, 
-              segment.y + gridSize / 2, 
-              radius, 
-              0, 
-              Math.PI * 2
-            );
-            ctx.fill();
-            
-            // Effetto luminoso
-            const grd = ctx.createRadialGradient(
-              segment.x + gridSize / 2 - 3, 
-              segment.y + gridSize / 2 - 3, 
-              0, 
-              segment.x + gridSize / 2,
-              segment.y + gridSize / 2,
-              radius
-            );
-            grd.addColorStop(0, adjustOpacity(baseColor, 0.7));
-            grd.addColorStop(1, adjustOpacity(darkColor, 0.1));
-            
-            ctx.fillStyle = grd;
-            ctx.beginPath();
-            ctx.arc(
-              segment.x + gridSize / 2, 
-              segment.y + gridSize / 2, 
-              radius, 
-              0, 
-              Math.PI * 2
-            );
-            ctx.fill();
-            
-            // Disegna gli occhi se è la testa
-            if (isHead) {
-              ctx.fillStyle = 'white';
-              
-              // Posizione degli occhi in base alla direzione
-              let eyeX1, eyeY1, eyeX2, eyeY2;
-              
-              switch (direction) {
-                case 'up':
-                  eyeX1 = segment.x + gridSize / 3;
-                  eyeY1 = segment.y + gridSize / 3;
-                  eyeX2 = segment.x + gridSize * 2 / 3;
-                  eyeY2 = segment.y + gridSize / 3;
-                  break;
-                case 'down':
-                  eyeX1 = segment.x + gridSize / 3;
-                  eyeY1 = segment.y + gridSize * 2 / 3;
-                  eyeX2 = segment.x + gridSize * 2 / 3;
-                  eyeY2 = segment.y + gridSize * 2 / 3;
-                  break;
-                case 'left':
-                  eyeX1 = segment.x + gridSize / 3;
-                  eyeY1 = segment.y + gridSize / 3;
-                  eyeX2 = segment.x + gridSize / 3;
-                  eyeY2 = segment.y + gridSize * 2 / 3;
-                  break;
-                case 'right':
-                  eyeX1 = segment.x + gridSize * 2 / 3;
-                  eyeY1 = segment.y + gridSize / 3;
-                  eyeX2 = segment.x + gridSize * 2 / 3;
-                  eyeY2 = segment.y + gridSize * 2 / 3;
-                  break;
-              }
-              
-              // Occhi
-              ctx.beginPath();
-              ctx.arc(eyeX1, eyeY1, 2, 0, Math.PI * 2);
-              ctx.arc(eyeX2, eyeY2, 2, 0, Math.PI * 2);
-              ctx.fill();
-              
-              // Pupille
-              ctx.fillStyle = 'black';
-              ctx.beginPath();
-              ctx.arc(eyeX1, eyeY1, 1, 0, Math.PI * 2);
-              ctx.arc(eyeX2, eyeY2, 1, 0, Math.PI * 2);
-              ctx.fill();
-            }
-          });
-        };
-        
-        // Funzione per disegnare il cibo con animazione
-        const drawFood = () => {
-          // Aggiorna l'animazione del cibo
-          setFoodAnimation(prev => (prev + 0.05) % (Math.PI * 2));
-          
-          // Disegna tutti gli elementi cibo
-          foodItems.forEach(food => {
-            // Disegna una mela invece di un quadrato
-            ctx.fillStyle = '#e73c3e';
-            ctx.beginPath();
-            
-            // Dimensione oscillante per l'animazione
-            const size = gridSize/2 + Math.sin(foodAnimation) * 2;
-            
-            ctx.arc(
-              food.x + gridSize/2, 
-              food.y + gridSize/2, 
-              size, 
-              0, 
-              Math.PI * 2
-            );
-            ctx.fill();
-            
-            // Picciolo
-            ctx.fillStyle = '#7d4e11';
-            ctx.fillRect(
-              food.x + gridSize/2 - 1, 
-              food.y + 2, 
-              2, 
-              5
-            );
-            
-            // Foglia
-            ctx.fillStyle = '#4CAF50';
-            ctx.beginPath();
-            ctx.ellipse(
-              food.x + gridSize/2 + 3, 
-              food.y + 4, 
-              3, 
-              2, 
-              Math.PI/4, 
-              0, 
-              Math.PI * 2
-            );
-            ctx.fill();
-            
-            // Brillantezza
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.beginPath();
-            ctx.arc(
-              food.x + gridSize/3, 
-              food.y + gridSize/3, 
-              gridSize/6, 
-              0, 
-              Math.PI * 2
-            );
-            ctx.fill();
-          });
-        };
-        
-        // Funzione per disegnare il punteggio
-        const drawScore = () => {
-          ctx.fillStyle = 'white';
-          ctx.font = 'bold 16px Poppins, sans-serif';
-          ctx.textAlign = 'left';
-          ctx.fillText(`Punteggio: ${score}`, 10, 25);
-          
-          ctx.textAlign = 'right';
-          ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
-        };
-        
-        // Avvia il ciclo di rendering
-        renderFrame();
-        
-        // Loop di movimento locale a 15 FPS
-        const movementInterval = setInterval(() => {
-          moveSnakeLocally(); // Movimento locale predittivo
-        }, 1000 / 15);
-        
-        // Loop delle API a 300ms
-        const apiInterval = setInterval(() => {
-          updateWithServer();
-        }, 300);
-        
-        return () => {
-          console.log('Termine loop di gioco...');
-          cancelAnimationFrame(renderLoopRef.current);
-          clearInterval(movementInterval);
-          clearInterval(apiInterval);
-        };
-      } catch (err) {
-        console.error('Errore nel loop di gioco:', err);
-        setError('Errore di gioco: ' + err.message);
-      }
-    }
-  }, [gameStarted, playerId, playerState]);
   
   // Gestisce gli input da tastiera
   useEffect(() => {
