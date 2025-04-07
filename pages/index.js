@@ -72,11 +72,11 @@ export default function Home() {
     setIsMobile(isMobileDevice());
   }, []);
   
-  // Risolve problema sfarfallio: usa requestAnimationFrame invece di setInterval
+  // Loop di gioco con setInterval (più stabile)
   useEffect(() => {
     if (!gameStarted || !playerId || !playerState) return;
 
-    console.log('Avvio loop di gioco con requestAnimationFrame');
+    console.log('Avvio loop di gioco con setInterval');
     
     // Preparazione del canvas
     const canvas = canvasRef.current;
@@ -85,42 +85,12 @@ export default function Home() {
       canvas.height = 600;
     }
     
-    // Riferimenti alle funzioni di rendering e update
-    let movementTimestamp = 0;
-    let serverUpdateTimestamp = 0;
-    let lastRenderTimestamp = 0;
-    
-    // Funzione principale di game loop
-    const gameLoop = (timestamp) => {
-      // Controlla se è ora di renderizzare (limita a 30 FPS)
-      const shouldRender = timestamp - lastRenderTimestamp > 33; // ~30 FPS
+    // Loop di rendering
+    const renderInterval = setInterval(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
       
-      // Aggiorna logica di movimento (5 FPS - ogni 200ms)
-      if (timestamp - movementTimestamp > 200) {
-        updateLocalMovement();
-        movementTimestamp = timestamp;
-      }
-      
-      // Aggiorna con il server (ogni 500ms = 2 volte al secondo)
-      if (timestamp - serverUpdateTimestamp > 500) {
-        updateWithServer();
-        serverUpdateTimestamp = timestamp;
-      }
-      
-      // Rendering (30 FPS max)
-      if (shouldRender) {
-        renderGame();
-        lastRenderTimestamp = timestamp;
-      }
-      
-      // Continua il loop
-      renderLoopRef.current = requestAnimationFrame(gameLoop);
-    };
-    
-    // Funzione di rendering
-    const renderGame = () => {
       const ctx = canvas.getContext('2d');
-      if (!ctx) return;
       
       // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -164,10 +134,6 @@ export default function Home() {
         );
         ctx.fill();
       });
-      
-      // Debug info su otherPlayers
-      document.getElementById('debug-info').textContent = 
-        `Altri giocatori: ${otherPlayers.length} - IDs: ${otherPlayers.map(p => p.id).join(', ')}`;
       
       // Disegna gli altri serpenti
       if (otherPlayers && otherPlayers.length > 0) {
@@ -227,10 +193,10 @@ export default function Home() {
       
       ctx.textAlign = 'right';
       ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
-    };
+    }, 1000 / 20); // 20 FPS
     
-    // Funzione per aggiornare il movimento locale
-    const updateLocalMovement = () => {
+    // Loop di movimento locale
+    const moveInterval = setInterval(() => {
       if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
       
       const gridSize = 20;
@@ -265,16 +231,18 @@ export default function Home() {
       }));
       
       lastDirectionRef.current = directionRef.current;
-    };
+    }, 1000 / 6); // 6 FPS (più lento)
     
-    // Avvia il game loop
-    renderLoopRef.current = requestAnimationFrame(gameLoop);
+    // Comunicazione col server
+    const serverInterval = setInterval(() => {
+      updateWithServer();
+    }, 1000); // 1 volta al secondo
     
     // Pulizia
     return () => {
-      if (renderLoopRef.current) {
-        cancelAnimationFrame(renderLoopRef.current);
-      }
+      clearInterval(renderInterval);
+      clearInterval(moveInterval);
+      clearInterval(serverInterval);
     };
   }, [gameStarted, playerId, playerState, foodItems, otherPlayers, score]);
   
@@ -298,7 +266,7 @@ export default function Home() {
     // Gestisci l'evento player-joined
     channel.bind('player-joined', (data) => {
       if (data.player && data.player.id !== playerId) {
-        console.log('RICEVUTO PLAYER-JOINED:', data.player.id);
+        console.log('Nuovo giocatore:', data.player.id);
         
         // Aggiungi il nuovo giocatore allo stato
         setOtherPlayers(prev => {
@@ -320,8 +288,6 @@ export default function Home() {
     // Gestisci l'evento player-moved
     channel.bind('player-moved', (data) => {
       if (data.playerId !== playerId && data.player) {
-        console.log('RICEVUTO PLAYER-MOVED:', data.playerId);
-        
         // Aggiorna la posizione del giocatore
         setOtherPlayers(prev => {
           const updated = prev.filter(p => p.id !== data.playerId);
@@ -659,18 +625,6 @@ export default function Home() {
       ) : (
         <div id="game-container">
           <canvas ref={canvasRef} id="gameCanvas"></canvas>
-          
-          {/* Area debug per monitorare i problemi */}
-          <div id="debug-info" style={{
-            position: 'absolute',
-            top: '5px',
-            left: '5px',
-            color: 'white',
-            background: 'rgba(0,0,0,0.5)',
-            padding: '5px',
-            fontSize: '12px',
-            zIndex: 1000
-          }}></div>
           
           {isMobile && (
             <div className="controls-container">
