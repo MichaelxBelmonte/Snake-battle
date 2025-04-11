@@ -67,7 +67,7 @@ const generateInitialSnake = (players = []) => {
 };
 
 // Mantieni lo stato globale del gioco
-let gameState = {
+export const gameState = {
     players: [],
     foodItems: [], // Array di elementi cibo invece di un singolo elemento
     maxPlayers: 10, // Limite di 10 giocatori simultanei
@@ -109,6 +109,16 @@ export default async function handler(req, res) {
         if (!playerName || !playerColor) {
             return res.status(400).json({ error: 'Nome e colore del giocatore sono richiesti' });
         }
+        
+        // Pulisci i giocatori inattivi (non aggiornati negli ultimi 30 secondi)
+        const now = Date.now();
+        gameState.players = gameState.players.filter(player => {
+            const isActive = now - player.lastUpdate < 30000;
+            if (!isActive) {
+                console.log(`Rimuovo giocatore inattivo: ${player.id}`);
+            }
+            return isActive;
+        });
         
         // Verifica se il giocatore esiste già
         let player = gameState.players.find(p => p.name === playerName);
@@ -155,8 +165,16 @@ export default async function handler(req, res) {
             }
         }
         
-        // Ottieni gli altri giocatori (escludi il giocatore corrente)
-        const otherPlayers = gameState.players.filter(p => p.id !== player.id);
+        // Prepara i dati per gli altri giocatori (escluso il giocatore corrente)
+        const otherPlayers = gameState.players
+            .filter(p => p.id !== player.id)
+            .map(p => ({
+                id: p.id,
+                name: p.name,
+                color: p.color,
+                snake: p.snake,
+                score: p.score
+            }));
         
         // Configura Pusher
         const pusher = getPusherInstance();

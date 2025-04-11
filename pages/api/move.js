@@ -14,10 +14,13 @@ const getPusherInstance = () => {
   return pusher;
 };
 
+// Importa lo stato globale dal file join.js (simulato, perché in realtà è in memoria)
+import { gameState } from './join.js';
+
 // Genera una posizione casuale sulla griglia
 const generateRandomPosition = (excludePositions = []) => {
   const gridSize = 20;
-  const maxX = 800 - gridSize; // Aumentato a 800px per match con il client
+  const maxX = 800 - gridSize;
   const maxY = 600 - gridSize;
   
   let newPosition;
@@ -42,11 +45,43 @@ const generateRandomPosition = (excludePositions = []) => {
   return newPosition;
 };
 
+// Verifica collisione con cibo
+const checkFoodCollision = (head, foodItems) => {
+  for (let i = 0; i < foodItems.length; i++) {
+    if (head.x === foodItems[i].x && head.y === foodItems[i].y) {
+      return i; // Restituisce l'indice del cibo colliso
+    }
+  }
+  return -1; // Nessuna collisione
+};
+
+// Verifica collisione con serpenti (incluso se stesso)
+const checkSnakeCollision = (head, snake, otherSnakes, ignoreHead = false) => {
+  // Controlla collisione con se stesso (esclusa la testa)
+  for (let i = ignoreHead ? 1 : 0; i < snake.length; i++) {
+    if (head.x === snake[i].x && head.y === snake[i].y) {
+      return true;
+    }
+  }
+  
+  // Controlla collisione con altri serpenti
+  for (const otherSnake of otherSnakes) {
+    for (const segment of otherSnake) {
+      if (head.x === segment.x && head.y === segment.y) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+};
+
 // Mantieni lo stato globale del gioco
 let gameState = {
   players: [],
   foodItems: [],
-  maxFood: 5, // Massimo 5 cibi contemporaneamente
+  maxPlayers: 10,
+  maxFood: 5,
 };
 
 export default async function handler(req, res) {
@@ -69,139 +104,119 @@ export default async function handler(req, res) {
     const { playerId, direction, playerState } = req.body;
     
     if (!playerId || !direction || !playerState) {
-      return res.status(400).json({ error: 'Dati richiesti mancanti' });
+      return res.status(400).json({ error: 'Dati mancanti nella richiesta' });
     }
     
-    // Recupera il giocatore dallo stato di gioco globale
+    // Pulisci i giocatori inattivi (non aggiornati negli ultimi 30 secondi)
+    const now = Date.now();
+    gameState.players = gameState.players.filter(player => {
+      const isActive = now - player.lastUpdate < 30000;
+      if (!isActive) {
+        console.log(`Rimuovo giocatore inattivo: ${player.id}`);
+      }
+      return isActive;
+    });
+    
+    // Cerca il giocatore nello stato del gioco
     let player = gameState.players.find(p => p.id === playerId);
     
-    // Se il giocatore non esiste nello stato globale, aggiungilo
     if (!player) {
-      player = {
-        ...playerState,
-        id: playerId,
-        lastUpdate: Date.now()
-      };
-      console.log(`Nuovo giocatore: ${playerState.name || playerId}`);
+      // Aggiungi giocatore se non esiste (potrebbe accadere se il server viene riavviato)
+      player = playerState;
       gameState.players.push(player);
     } else {
-      // Aggiorna lo stato del giocatore esistente
+      // Aggiorna lo stato del giocatore con i nuovi dati
       player.snake = playerState.snake;
       player.score = playerState.score;
-      player.lastUpdate = Date.now();
-      player.name = playerState.name || player.name;
-      player.color = playerState.color || player.color;
+      player.name = playerState.name;
+      player.color = playerState.color;
     }
     
-    // Stato locale per il client
-    let hasEatenFood = false;
-    let eatenFoodIndex = -1;
+    // Ottieni la posizione della testa e movimento precedente
+    const head = { ...player.snake[0] };
+    const gridSize = 20;
+    let newHead;
     
     // Calcola la nuova posizione della testa
-    const gridSize = 20;
-    const head = { ...player.snake[0] };
-    const canvasWidth = 800;
-    const canvasHeight = 600;
-    
-    // Aggiorna la posizione della testa in base alla direzione
     switch (direction) {
       case 'up':
-        head.y -= gridSize;
-        if (head.y < 0) head.y = canvasHeight - gridSize;
+        newHead = { x: head.x, y: head.y - gridSize };
         break;
       case 'down':
-        head.y += gridSize;
-        if (head.y >= canvasHeight) head.y = 0;
+        newHead = { x: head.x, y: head.y + gridSize };
         break;
       case 'left':
-        head.x -= gridSize;
-        if (head.x < 0) head.x = canvasWidth - gridSize;
+        newHead = { x: head.x - gridSize, y: head.y };
         break;
       case 'right':
-        head.x += gridSize;
-        if (head.x >= canvasWidth) head.x = 0;
+        newHead = { x: head.x + gridSize, y: head.y };
         break;
       default:
-        return res.status(400).json({ error: 'Direzione non valida' });
+        newHead = { ...head };
     }
     
-    // Funzione semplificata per verificare le collisioni
-    const checkCollision = (head, allPlayers, currentPlayerId) => {
-      for (const p of allPlayers) {
-        // Salta se stesso
-        if (p.id === currentPlayerId) {
-          // Ma controlla collisione con se stesso (esclusa la testa)
-          for (let i = 1; i < p.snake.length; i++) {
-            if (head.x === p.snake[i].x && head.y === p.snake[i].y) {
-              return true;
-            }
-          }
-        } else if (p.snake) {
-          // Controlla collisione con altri serpenti
-          for (const segment of p.snake) {
-            if (head.x === segment.x && head.y === segment.y) {
-              return true;
-            }
-          }
-        }
-      }
-      return false;
-    };
+    // Gestisci il movimento oltre i bordi (effetto tunnel)
+    if (newHead.x < 0) newHead.x = 800 - gridSize;
+    if (newHead.x >= 800) newHead.x = 0;
+    if (newHead.y < 0) newHead.y = 600 - gridSize;
+    if (newHead.y >= 600) newHead.y = 0;
     
-    // Controlla collisione
-    if (checkCollision(head, gameState.players, playerId)) {
-      console.log(`Collisione: ${player.name || playerId}`);
-      // Reset del serpente in caso di collisione (perdita)
-      const randomPos = generateRandomPosition(
-        gameState.players.flatMap(p => p.snake || []).concat(gameState.foodItems)
-      );
+    // Ottieni gli altri serpenti per il controllo delle collisioni
+    const otherSnakes = gameState.players
+      .filter(p => p.id !== playerId)
+      .map(p => p.snake || []);
+    
+    // Controlla collisione con altri serpenti
+    const collidesWithSnake = checkSnakeCollision(newHead, player.snake, otherSnakes, true);
+    
+    if (collidesWithSnake) {
+      // Game over - reimposta il serpente
+      console.log(`Game over per il giocatore ${playerId}`);
       
-      player.snake = [
-        randomPos,
-        { x: randomPos.x - gridSize, y: randomPos.y },
-        { x: randomPos.x - (2 * gridSize), y: randomPos.y }
+      // Genera una nuova posizione sicura per ricominciare
+      const allPositions = [
+        ...gameState.foodItems,
+        ...gameState.players.flatMap(p => p.snake || [])
       ];
-      player.score = 0;
-    } else {
-      // Controlla se il serpente ha mangiato del cibo
-      eatenFoodIndex = gameState.foodItems.findIndex(food => 
-        food.x === head.x && food.y === head.y
-      );
+      const safePosition = generateRandomPosition(allPositions);
       
-      if (eatenFoodIndex !== -1) {
-        // Il serpente ha mangiato del cibo
-        hasEatenFood = true;
+      // Ricrea il serpente
+      player.snake = [
+        safePosition,
+        { x: safePosition.x - gridSize, y: safePosition.y },
+        { x: safePosition.x - (2 * gridSize), y: safePosition.y }
+      ];
+      player.score = 0; // Reimposta il punteggio
+    } else {
+      // Controlla collisione con cibo
+      const foodIndex = checkFoodCollision(newHead, gameState.foodItems);
+      
+      if (foodIndex >= 0) {
+        // Rimuovi il cibo consumato
+        gameState.foodItems.splice(foodIndex, 1);
+        
+        // Aumenta il punteggio
         player.score += 10;
-        
-        // Aggiunge un nuovo segmento al serpente (non rimuove l'ultimo)
-        player.snake = [head, ...player.snake];
-        
-        // Rimuove il cibo mangiato
-        gameState.foodItems.splice(eatenFoodIndex, 1);
         
         // Genera nuovo cibo
         const occupiedPositions = [
           ...gameState.foodItems,
           ...gameState.players.flatMap(p => p.snake || [])
         ];
-        const newFood = generateRandomPosition(occupiedPositions);
-        gameState.foodItems.push(newFood);
+        gameState.foodItems.push(generateRandomPosition(occupiedPositions));
+        
+        // Aggiorna il serpente (aggiunge un nuovo segmento senza rimuovere l'ultimo)
+        player.snake = [newHead, ...player.snake];
       } else {
-        // Il serpente si muove normalmente
-        player.snake = [head, ...player.snake.slice(0, -1)];
+        // Movimento normale (togli l'ultimo segmento)
+        player.snake = [newHead, ...player.snake.slice(0, -1)];
       }
     }
     
-    // Pulisce giocatori inattivi (più di 15 secondi senza aggiornamenti)
-    const now = Date.now();
-    const playersBeforeCleanup = gameState.players.length;
-    gameState.players = gameState.players.filter(p => now - p.lastUpdate < 15000);
+    // Aggiorna il timestamp
+    player.lastUpdate = Date.now();
     
-    if (playersBeforeCleanup !== gameState.players.length) {
-      console.log(`Rimossi ${playersBeforeCleanup - gameState.players.length} giocatori inattivi`);
-    }
-    
-    // Assicura che ci siano sempre abbastanza elementi cibo
+    // Assicurati che ci siano abbastanza elementi cibo
     while (gameState.foodItems.length < gameState.maxFood) {
       const occupiedPositions = [
         ...gameState.foodItems,
@@ -210,19 +225,26 @@ export default async function handler(req, res) {
       gameState.foodItems.push(generateRandomPosition(occupiedPositions));
     }
     
-    // Ottieni gli altri giocatori (escludi il giocatore corrente)
-    const otherPlayers = gameState.players.filter(p => p.id !== playerId);
+    // Prepara i dati per gli altri giocatori (escluso il giocatore corrente)
+    const otherPlayers = gameState.players
+      .filter(p => p.id !== playerId)
+      .map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        snake: p.snake,
+        score: p.score
+      }));
     
     // Configura Pusher
     const pusher = getPusherInstance();
     
-    // Invia l'aggiornamento a tutti i client
+    // Notifica tutti i client con la mossa del giocatore
     await pusher.trigger('snake-game', 'player-moved', {
       playerId,
       player,
       foodItems: gameState.foodItems,
-      hasEatenFood,
-      otherPlayers: gameState.players.filter(p => p.id !== playerId)
+      otherPlayers
     });
     
     return res.status(200).json({

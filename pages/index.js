@@ -78,8 +78,6 @@ export default function Home() {
 
     console.log('Avvio loop di gioco con setInterval');
     
-    // Il canvas è già stato inizializzato in handleStartGame
-    
     // Piccolo ritardo prima di avviare i loop per garantire che lo stato sia aggiornato
     const startGameLoops = () => {
       // Loop di rendering
@@ -88,6 +86,7 @@ export default function Home() {
         if (!canvas) return;
         
         const ctx = canvas.getContext('2d');
+        if (!ctx) return;
         
         // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -119,18 +118,22 @@ export default function Home() {
         }
         
         // Disegna il cibo
-        foodItems.forEach(food => {
-          ctx.fillStyle = '#e73c3e'; // Rosso per il cibo
-          ctx.beginPath();
-          ctx.arc(
-            food.x + gridSize/2,
-            food.y + gridSize/2,
-            gridSize/2 - 2,
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-        });
+        if (foodItems && foodItems.length > 0) {
+          foodItems.forEach(food => {
+            if (!food) return;
+            
+            ctx.fillStyle = '#e73c3e'; // Rosso per il cibo
+            ctx.beginPath();
+            ctx.arc(
+              food.x + gridSize/2,
+              food.y + gridSize/2,
+              gridSize/2 - 2,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+          });
+        }
         
         // Disegna gli altri serpenti
         if (otherPlayers && otherPlayers.length > 0) {
@@ -144,6 +147,8 @@ export default function Home() {
               
               // Disegna il serpente
               player.snake.forEach((segment, i) => {
+                if (!segment) return;
+                
                 ctx.fillStyle = player.color || '#00ff00';
                 ctx.beginPath();
                 ctx.arc(
@@ -160,7 +165,7 @@ export default function Home() {
         }
         
         // Disegna il proprio serpente
-        if (playerState.snake && playerState.snake.length > 0) {
+        if (playerState && playerState.snake && playerState.snake.length > 0) {
           // Disegna il nome
           ctx.fillStyle = 'white';
           ctx.font = '12px Arial';
@@ -169,6 +174,8 @@ export default function Home() {
           
           // Disegna il serpente
           playerState.snake.forEach((segment, i) => {
+            if (!segment) return;
+            
             ctx.fillStyle = playerColor;
             ctx.beginPath();
             ctx.arc(
@@ -261,61 +268,75 @@ export default function Home() {
     
     console.log('Inizializzazione Pusher per:', playerId);
     
-    // Resetta lo stato degli other players
-    setOtherPlayers([]);
-    
-    // Inizializza Pusher
-    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
-    });
-    
-    // Sottoscrivi al canale
-    const channel = pusher.subscribe('snake-game');
-    
-    // Gestisci l'evento player-joined
-    channel.bind('player-joined', (data) => {
-      if (data.player && data.player.id !== playerId) {
-        console.log('Nuovo giocatore:', data.player.id);
+    try {
+      // Resetta lo stato degli other players
+      setOtherPlayers([]);
+      
+      // Inizializza Pusher
+      const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
+        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+      });
+      
+      // Sottoscrivi al canale
+      const channel = pusher.subscribe('snake-game');
+      
+      // Gestisci l'evento player-joined
+      channel.bind('player-joined', (data) => {
+        if (!data) return;
         
-        // Aggiungi il nuovo giocatore allo stato
-        setOtherPlayers(prev => {
-          // Verifica se il giocatore già esiste
-          const exists = prev.some(p => p.id === data.player.id);
-          if (!exists) {
-            // Aggiungi solo se non esiste già
-            return [...prev, data.player];
-          }
-          return prev;
-        });
-      }
+        if (data.player && data.player.id !== playerId) {
+          console.log('Nuovo giocatore:', data.player.id);
+          
+          // Aggiungi il nuovo giocatore allo stato
+          setOtherPlayers(prev => {
+            // Verifica se il giocatore già esiste
+            const exists = prev.some(p => p.id === data.player.id);
+            if (!exists) {
+              // Aggiungi solo se non esiste già
+              return [...prev, data.player];
+            }
+            return prev;
+          });
+        }
+        
+        if (data.foodItems) {
+          setFoodItems(data.foodItems);
+        }
+      });
       
-      if (data.foodItems) {
-        setFoodItems(data.foodItems);
-      }
-    });
-    
-    // Gestisci l'evento player-moved
-    channel.bind('player-moved', (data) => {
-      if (data.playerId !== playerId && data.player) {
-        // Aggiorna la posizione del giocatore
-        setOtherPlayers(prev => {
-          const updated = prev.filter(p => p.id !== data.playerId);
-          return [...updated, data.player];
-        });
-      }
+      // Gestisci l'evento player-moved
+      channel.bind('player-moved', (data) => {
+        if (!data) return;
+        
+        if (data.playerId !== playerId && data.player) {
+          // Aggiorna la posizione del giocatore
+          setOtherPlayers(prev => {
+            // Rimuovi il giocatore corrente, se presente
+            const updated = prev.filter(p => p.id !== data.playerId);
+            // Aggiungi il giocatore aggiornato
+            return [...updated, data.player];
+          });
+        }
+        
+        if (data.foodItems) {
+          setFoodItems(data.foodItems);
+        }
+      });
       
-      if (data.foodItems) {
-        setFoodItems(data.foodItems);
-      }
-    });
-    
-    // Disconnetti al termine
-    return () => {
-      console.log('Disconnessione Pusher');
-      channel.unbind_all();
-      channel.unsubscribe();
-      pusher.disconnect();
-    };
+      // Memorizza il riferimento a Pusher
+      pusherRef.current = pusher;
+      
+      // Disconnetti al termine
+      return () => {
+        console.log('Disconnessione Pusher');
+        channel.unbind_all();
+        channel.unsubscribe();
+        pusher.disconnect();
+      };
+    } catch (error) {
+      console.error('Errore inizializzazione Pusher:', error);
+      setError('Errore di connessione: ricarica la pagina');
+    }
   }, [gameStarted, playerId]);
   
   // Funzione di comunicazione con il server
@@ -565,19 +586,7 @@ export default function Home() {
       const data = await res.json();
       console.log('Dati ricevuti dal server:', data);
       
-      // Prepara il canvas prima di avviare il gioco
-      if (canvasRef.current) {
-        const canvas = canvasRef.current;
-        canvas.width = 800;
-        canvas.height = 600;
-        
-        // Pre-rendering del primo frame per evitare sfarfallio
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#121212';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-      
-      // Imposta i dati iniziali in un unico aggiornamento di stato
+      // Imposta i dati iniziali prima di manipolare il canvas
       setPlayerId(data.player.id);
       setPlayerState(data.player);
       setFoodItems(data.foodItems || []);
@@ -586,9 +595,40 @@ export default function Home() {
       
       // Breve ritardo prima di avviare il gioco per garantire che tutto sia pronto
       setTimeout(() => {
+        // Prepara il canvas dopo aver impostato i dati ma prima di mostrare l'interfaccia
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          canvas.width = 800;
+          canvas.height = 600;
+          
+          // Pre-rendering del primo frame per evitare sfarfallio
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#121212';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Disegna griglia
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+          ctx.lineWidth = 0.5;
+          const gridSize = 20;
+          
+          for (let x = 0; x <= canvas.width; x += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+          }
+          
+          for (let y = 0; y <= canvas.height; y += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+          }
+        }
+        
         setError('');
         setGameStarted(true);
-      }, 100);
+      }, 300); // Aumento il ritardo per garantire che il canvas sia pronto
       
       console.log('Gioco avviato con successo, ID:', data.player.id);
     } catch (err) {

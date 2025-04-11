@@ -1,0 +1,5 @@
+[33mcommit 2ab3e574934ac07c65c75a8ded0b0dccbb008b00[m[33m ([m[1;36mHEAD -> [m[1;32mmaster[m[33m)[m
+Author: Mike|lasagna <148987376+MichaelxBelmonte@users.noreply.github.com>
+Date:   Mon Apr 7 17:07:10 2025 +0200
+
+    Ritorno a setInterval per stabilità, rimosso debug, ridotta frequenza aggiornamenti
