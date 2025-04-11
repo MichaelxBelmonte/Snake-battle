@@ -58,6 +58,7 @@ export default function Home() {
   const [score, setScore] = useState(0);
   const [foodAnimation, setFoodAnimation] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
+  const [scale, setScale] = useState(1); // Fattore di scala per il canvas
   
   const canvasRef = useRef(null);
   const joystickRef = useRef(null);
@@ -66,6 +67,7 @@ export default function Home() {
   const apiLoopRef = useRef(null);
   const directionRef = useRef('right');
   const lastDirectionRef = useRef('right');
+  const gridSizeRef = useRef(20); // Dimensione della griglia costante
   
   // Rileva dispositivo mobile al caricamento
   useEffect(() => {
@@ -100,6 +102,9 @@ export default function Home() {
         // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
+        // Dimensione della griglia costante per il rendering
+        const gridSize = gridSizeRef.current;
+        
         // Sfondo
         const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
         gradient.addColorStop(0, '#121212');
@@ -108,7 +113,6 @@ export default function Home() {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
         // Disegna griglia
-        const gridSize = 20;
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
         ctx.lineWidth = 0.5;
         
@@ -243,7 +247,7 @@ export default function Home() {
         
         console.log("Movimento eseguito, playerState:", playerState);
         
-        const gridSize = 20;
+        const gridSize = gridSizeRef.current;
         const head = { ...playerState.snake[0] };
         const canvasWidth = 800;
         const canvasHeight = 600;
@@ -612,6 +616,55 @@ export default function Home() {
     };
   }, [gameStarted, isMobile]);
   
+  // Funzione per aggiustare la dimensione del canvas
+  const resizeCanvas = () => {
+    if (!canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    
+    // Dimensioni logiche del gioco
+    const logicalWidth = 800;
+    const logicalHeight = 600;
+    
+    // Ottieni le dimensioni del container
+    const container = document.getElementById('game-container');
+    if (!container) return;
+    
+    const containerWidth = container.clientWidth - 40; // Sottrai il padding
+    const containerHeight = window.innerHeight * 0.7; // Usa al massimo il 70% dell'altezza della finestra
+    
+    // Calcola la scala per adattare il canvas al container mantenendo l'aspect ratio
+    const scaleX = containerWidth / logicalWidth;
+    const scaleY = containerHeight / logicalHeight;
+    const newScale = Math.min(scaleX, scaleY, 1); // Non ingrandire oltre la dimensione originale
+    
+    // Imposta le dimensioni del canvas in pixel
+    canvas.width = logicalWidth;
+    canvas.height = logicalHeight;
+    
+    // Imposta le dimensioni in CSS 
+    canvas.style.width = `${logicalWidth * newScale}px`;
+    canvas.style.height = `${logicalHeight * newScale}px`;
+    
+    // Memorizza la scala per il rendering
+    setScale(newScale);
+    
+    console.log(`Canvas ridimensionato: scala ${newScale}, dimensioni ${logicalWidth * newScale}x${logicalHeight * newScale}`);
+  };
+  
+  // Ridimensiona il canvas quando la finestra cambia dimensione
+  useEffect(() => {
+    if (!gameStarted) return;
+    
+    window.addEventListener('resize', resizeCanvas);
+    // Imposta le dimensioni iniziali
+    resizeCanvas();
+    
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+    };
+  }, [gameStarted]);
+  
   // Inizializzazione della partita
   const handleStartGame = async (e) => {
     e.preventDefault();
@@ -650,6 +703,8 @@ export default function Home() {
       // Prepara il canvas prima di impostare i dati
       if (canvasRef.current) {
         const canvas = canvasRef.current;
+        
+        // Imposta dimensioni fisiche del canvas
         canvas.width = 800;
         canvas.height = 600;
         
@@ -661,7 +716,7 @@ export default function Home() {
         // Disegna griglia
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
         ctx.lineWidth = 0.5;
-        const gridSize = 20;
+        const gridSize = gridSizeRef.current;
         
         for (let x = 0; x <= canvas.width; x += gridSize) {
           ctx.beginPath();
@@ -693,7 +748,7 @@ export default function Home() {
           const ctx = canvas.getContext('2d');
           
           // Disegno debug del serpente iniziale per verifica
-          const gridSize = 20;
+          const gridSize = gridSizeRef.current;
           
           // Disegna il serpente con colore luminoso e bordo bianco per renderlo più visibile
           if (data.player && data.player.snake) {
@@ -772,6 +827,9 @@ export default function Home() {
         // Impostiamo anche la direzione iniziale
         directionRef.current = 'right';
         lastDirectionRef.current = 'right';
+        
+        // Ridimensiona il canvas per adattarlo al container
+        resizeCanvas();
         
         setError('');
         setGameStarted(true);
@@ -937,6 +995,7 @@ export default function Home() {
           display: flex;
           flex-direction: column;
           align-items: center;
+          overflow-x: hidden; /* Previene scroll orizzontale */
         }
         
         #game-container {
@@ -949,13 +1008,16 @@ export default function Home() {
           padding: 1.5rem;
           box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
           margin-top: 2rem;
+          box-sizing: border-box;
         }
         
         canvas {
-          width: 800px;
-          height: 600px;
-          max-width: 100%;
-          object-fit: contain;
+          display: block;
+          margin: 0 auto;
+          image-rendering: pixelated;
+          image-rendering: crisp-edges;
+          box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+          border-radius: 4px;
         }
         
         .controls-container {
@@ -1077,7 +1139,7 @@ export default function Home() {
         /* Media query per dispositivi mobili */
         @media (max-width: 768px) {
           .container {
-            padding: 1rem;
+            padding: 0.5rem;
           }
           
           h1 {
@@ -1092,6 +1154,7 @@ export default function Home() {
           canvas {
             width: 100%;
             height: auto;
+            max-height: 80vh;
             aspect-ratio: 4/3;
           }
           
