@@ -14,7 +14,7 @@ const getPusherInstance = () => {
   return pusher;
 };
 
-// Importa lo stato globale dal file join.js (simulato, perché in realtà è in memoria)
+// Importa lo stato globale dal file join.js
 import { gameState } from './join.js';
 
 // Genera una posizione casuale sulla griglia
@@ -74,14 +74,6 @@ const checkSnakeCollision = (head, snake, otherSnakes, ignoreHead = false) => {
   }
   
   return false;
-};
-
-// Mantieni lo stato globale del gioco
-let gameState = {
-  players: [],
-  foodItems: [],
-  maxPlayers: 10,
-  maxFood: 5,
 };
 
 export default async function handler(req, res) {
