@@ -21,6 +21,8 @@ import { gameState } from './join.js';
 const lastPositionCache = new Map();
 // Throttle per le notifiche Pusher per evitare di sovraccaricare il server
 const lastPusherUpdate = new Map();
+// Contatore di aggiornamenti forzati per debug
+let forcedUpdateCounter = 0;
 
 // Genera una posizione casuale sulla griglia
 const generateRandomPosition = (excludePositions = []) => {
@@ -149,6 +151,7 @@ export default async function handler(req, res) {
         // Rimuovi anche dalla cache quando un giocatore diventa inattivo
         lastPositionCache.delete(player.id);
         lastPusherUpdate.delete(player.id);
+        console.log(`Rimosso giocatore inattivo: ${player.id}, ${player.name}`);
       }
       return isActive;
     });
@@ -160,6 +163,7 @@ export default async function handler(req, res) {
       // Aggiungi giocatore se non esiste (potrebbe accadere se il server viene riavviato)
       player = playerState;
       gameState.players.push(player);
+      console.log(`Aggiunto nuovo giocatore: ${player.id}, ${player.name}`);
     } else {
       // Aggiorna lo stato del giocatore con i nuovi dati
       player.snake = playerState.snake;
@@ -250,7 +254,7 @@ export default async function handler(req, res) {
     }
     
     // Aggiorna il timestamp
-    player.lastUpdate = Date.now();
+    player.lastUpdate = now;
     
     // Assicurati che ci siano abbastanza elementi cibo
     while (gameState.foodItems.length < gameState.maxFood) {
@@ -269,13 +273,23 @@ export default async function handler(req, res) {
     // Ottimizza l'invio dei dati: verifica se la posizione è cambiata significativamente
     const positionChanged = hasPositionChanged(playerId, player.snake);
     
-    // Throttling delle notifiche Pusher: massimo una notifica ogni 500ms per giocatore
+    // Throttling ridotto per le notifiche Pusher (da 500ms a 200ms)
     const shouldSendPusherUpdate = 
       !lastPusherUpdate.has(playerId) || 
-      (now - lastPusherUpdate.get(playerId) > 500);
+      (now - lastPusherUpdate.get(playerId) > 200);
     
-    // Configura Pusher e invia aggiornamento solo se necessario
-    if (positionChanged && shouldSendPusherUpdate) {
+    // Invia comunque aggiornamenti periodici anche senza cambiamenti di posizione
+    const shouldSendForcedUpdate = 
+      !lastPusherUpdate.has(playerId) || 
+      (now - lastPusherUpdate.get(playerId) > 1000);
+    
+    // Configura Pusher e invia aggiornamento
+    if (positionChanged || shouldSendForcedUpdate) {
+      if (shouldSendForcedUpdate && !positionChanged) {
+        forcedUpdateCounter++;
+        console.log(`Invio aggiornamento forzato #${forcedUpdateCounter} per ${playerId}`);
+      }
+      
       const pusher = getPusherInstance();
       
       // Memorizza l'ultimo timestamp di aggiornamento
@@ -286,14 +300,23 @@ export default async function handler(req, res) {
         playerId,
         player: preparePlayerData(player),
         foodItems: gameState.foodItems,
-        otherPlayers
+        otherPlayers,
+        timestamp: now, // Aggiungi un timestamp per verificare l'ordine degli aggiornamenti
+        forcedUpdate: shouldSendForcedUpdate && !positionChanged
       });
+    }
+    
+    // Aggiorna il conteggio giocatori e log per debugging
+    const activePlayerCount = gameState.players.length;
+    if (otherPlayers.length > 0) {
+      console.log(`Giocatori attivi: ${activePlayerCount}, Altri giocatori inviati: ${otherPlayers.length}`);
     }
     
     return res.status(200).json({
       player: preparePlayerData(player),
       foodItems: gameState.foodItems,
-      otherPlayers
+      otherPlayers,
+      activePlayerCount
     });
     
   } catch (error) {

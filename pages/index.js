@@ -85,7 +85,7 @@ export default function Home() {
       // Loop di rendering con requestAnimationFrame per migliori performance
       let lastRenderTime = 0;
       let frameId;
-      const fpsLimit = 30; // Limita a 30 FPS per maggiore stabilità
+      const fpsLimit = isMobile ? 20 : 30; // Meno FPS su mobile per migliorare performance
       const frameInterval = 1000 / fpsLimit;
       
       const renderLoop = (timestamp) => {
@@ -102,6 +102,11 @@ export default function Home() {
         
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
+        
+        // Ridurre la qualità visiva per migliorare le prestazioni su mobile
+        if (isMobile) {
+          ctx.imageSmoothingEnabled = false; // Disabilita antialiasing per migliorare performance
+        }
         
         // Verifica che playerState.snake sia disponibile
         if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
@@ -157,24 +162,41 @@ export default function Home() {
         
         // Disegna gli altri serpenti
         if (otherPlayers && otherPlayers.length > 0) {
+          console.log(`Rendering ${otherPlayers.length} altri giocatori`);
+          
           otherPlayers.forEach(player => {
-            if (player && player.snake && player.snake.length > 0) {
+            // Verifica più rigorosa degli altri giocatori
+            if (player && player.id && player.snake && player.snake.length > 0) {
               // Disegna il nome
               ctx.fillStyle = 'white';
               ctx.font = '12px Arial';
               ctx.textAlign = 'center';
               ctx.fillText(player.name || 'Giocatore', player.snake[0].x + gridSize/2, player.snake[0].y - 5);
               
-              // Disegna il serpente
+              // Disegna il serpente con contorno più visibile
               player.snake.forEach((segment, i) => {
                 if (!segment) return;
                 
+                // Bordo più grande e visibile
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(
+                  segment.x + gridSize/2,
+                  segment.y + gridSize/2,
+                  i === 0 ? gridSize/2 + 3 : gridSize/2 + 1,
+                  0,
+                  Math.PI * 2
+                );
+                ctx.stroke();
+                
+                // Colore interno
                 ctx.fillStyle = player.color || '#00ff00';
                 ctx.beginPath();
                 ctx.arc(
                   segment.x + gridSize/2,
                   segment.y + gridSize/2,
-                  i === 0 ? gridSize/2 : gridSize/2 - 2, // Testa più grande
+                  i === 0 ? gridSize/2 : gridSize/2 - 2,
                   0,
                   Math.PI * 2
                 );
@@ -182,6 +204,9 @@ export default function Home() {
               });
             }
           });
+        } else if (isMobile) {
+          // Debug info su mobile per verificare la visibilità
+          console.log('Mobile: nessun altro giocatore da renderizzare');
         }
         
         // Disegna il proprio serpente
@@ -336,23 +361,35 @@ export default function Home() {
       channel.bind('player-joined', (data) => {
         if (!data) return;
         
+        console.log(`Ricevuto aggiornamento nuovo giocatore`);
+        
+        // Aggiorna il cibo
+        if (data.foodItems) {
+          setFoodItems(data.foodItems);
+        }
+        
+        // Aggiungi il nuovo giocatore allo stato
         if (data.player && data.player.id !== playerId) {
           console.log('Nuovo giocatore:', data.player.id);
           
-          // Aggiungi il nuovo giocatore allo stato
           setOtherPlayers(prev => {
-            // Verifica se il giocatore già esiste
-            const exists = prev.some(p => p.id === data.player.id);
-            if (!exists) {
-              // Aggiungi solo se non esiste già
-              return [...prev, data.player];
+            // Usa un Map per una riconciliazione più efficiente
+            const playersMap = new Map(prev.map(p => [p.id, p]));
+            
+            // Verifica se il giocatore ha dati validi
+            if (data.player && data.player.snake && data.player.snake.length > 0) {
+              playersMap.set(data.player.id, data.player);
             }
-            return prev;
+            
+            // Ritorna l'array aggiornato
+            return Array.from(playersMap.values());
           });
         }
         
-        if (data.foodItems) {
-          setFoodItems(data.foodItems);
+        // Aggiorna tutti gli altri giocatori quando arrivano i dati completi
+        if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
+          console.log(`Aggiornamento lista completa: ${data.otherPlayers.length} giocatori`);
+          setOtherPlayers(data.otherPlayers);
         }
       });
       
@@ -360,18 +397,34 @@ export default function Home() {
       channel.bind('player-moved', (data) => {
         if (!data) return;
         
-        if (data.playerId !== playerId && data.player) {
-          // Aggiorna la posizione del giocatore
+        // Aggiungi logging per debug
+        console.log(`Ricevuto aggiornamento giocatore: ${data.playerId}`);
+        
+        // Aggiorna SEMPRE il cibo, non solo quando c'è un altro giocatore
+        if (data.foodItems) {
+          setFoodItems(data.foodItems);
+        }
+        
+        // Aggiorna dati altri giocatori anche quando non riconosci l'ID
+        if (data.playerId !== playerId) {
           setOtherPlayers(prev => {
-            // Rimuovi il giocatore corrente, se presente
-            const updated = prev.filter(p => p.id !== data.playerId);
-            // Aggiungi il giocatore aggiornato
-            return [...updated, data.player];
+            // Usa un Map per una riconciliazione più efficiente
+            const playersMap = new Map(prev.map(p => [p.id, p]));
+            
+            // Verifica se il giocatore ha dati validi
+            if (data.player && data.player.snake && data.player.snake.length > 0) {
+              playersMap.set(data.playerId, data.player);
+            }
+            
+            // Ritorna l'array aggiornato
+            return Array.from(playersMap.values());
           });
         }
         
-        if (data.foodItems) {
-          setFoodItems(data.foodItems);
+        // Aggiorna anche tutti gli altri giocatori quando arrivano i dati completi
+        if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
+          console.log(`Aggiornamento lista completa: ${data.otherPlayers.length} giocatori`);
+          setOtherPlayers(data.otherPlayers);
         }
       });
       
