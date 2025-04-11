@@ -79,12 +79,24 @@ export default function Home() {
     if (!gameStarted || !playerId || !playerState) return;
 
     console.log('Avvio loop di gioco con setInterval');
-    console.log('Stato iniziale snake:', playerState.snake);
     
     // Piccolo ritardo prima di avviare i loop per garantire che lo stato sia aggiornato
     const startGameLoops = () => {
-      // Loop di rendering
-      const renderInterval = setInterval(() => {
+      // Loop di rendering con requestAnimationFrame per migliori performance
+      let lastRenderTime = 0;
+      let frameId;
+      const fpsLimit = 30; // Limita a 30 FPS per maggiore stabilità
+      const frameInterval = 1000 / fpsLimit;
+      
+      const renderLoop = (timestamp) => {
+        frameId = requestAnimationFrame(renderLoop);
+        const elapsed = timestamp - lastRenderTime;
+        
+        // Limita gli FPS per migliorare le performance
+        if (elapsed < frameInterval) return;
+        
+        lastRenderTime = timestamp - (elapsed % frameInterval);
+        
         const canvas = canvasRef.current;
         if (!canvas) return;
         
@@ -92,12 +104,7 @@ export default function Home() {
         if (!ctx) return;
         
         // Verifica che playerState.snake sia disponibile
-        if (!playerState || !playerState.snake || playerState.snake.length === 0) {
-          console.error("RenderLoop: playerState.snake non disponibile", playerState);
-          return;
-        }
-        
-        console.log("RenderLoop: Disegno snake at", playerState.snake[0]);
+        if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
         
         // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -224,8 +231,6 @@ export default function Home() {
             // Resetta l'effetto shadow
             ctx.shadowBlur = 0;
           });
-        } else {
-          console.error("RenderLoop: Impossibile disegnare il serpente, dati non validi", playerState);
         }
         
         // Disegna stats
@@ -236,16 +241,14 @@ export default function Home() {
         
         ctx.textAlign = 'right';
         ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
-      }, 1000 / 20); // 20 FPS
+      };
+      
+      // Avvia il loop di rendering
+      frameId = requestAnimationFrame(renderLoop);
       
       // Loop di movimento locale
       const moveInterval = setInterval(() => {
-        if (!playerState || !playerState.snake || playerState.snake.length === 0) {
-          console.log("Movimento saltato, playerState non valido:", playerState);
-          return;
-        }
-        
-        console.log("Movimento eseguito, playerState:", playerState);
+        if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
         
         const gridSize = gridSizeRef.current;
         const head = { ...playerState.snake[0] };
@@ -272,33 +275,27 @@ export default function Home() {
             break;
         }
         
-        // Debug: mostra il contenuto stato prima dell'aggiornamento
-        console.log("Testa originale:", playerState.snake[0], "Nuova testa:", head);
-        
-        // Aggiorna la posizione localmente
+        // Aggiorna la posizione localmente (solo se lo stato è valido)
         setPlayerState(prev => {
-          if (!prev || !prev.snake || prev.snake.length === 0) {
-            console.error("Stato precedente non valido:", prev);
-            return prev;
-          }
-          const newState = {
+          if (!prev || !prev.snake || prev.snake.length === 0) return prev;
+          
+          // Crea una copia profonda per evitare mutazioni
+          return {
             ...prev,
             snake: [head, ...prev.snake.slice(0, -1)]
           };
-          console.log("Nuovo stato:", newState);
-          return newState;
         });
         
         lastDirectionRef.current = directionRef.current;
-      }, 1000 / 6); // 6 FPS (più lento)
+      }, 1000 / 5); // 5 FPS (più lento e stabile)
       
-      // Comunicazione col server
+      // Comunicazione col server - più lento per ridurre il carico
       const serverInterval = setInterval(() => {
         updateWithServer();
-      }, 1000); // 1 volta al secondo
+      }, 1500); // Una volta ogni 1.5 secondi
       
       // Memorizza gli intervalli per la pulizia
-      renderLoopRef.current = renderInterval;
+      renderLoopRef.current = frameId;
       apiLoopRef.current = serverInterval;
       
       // Aggiungi una referenza per moveInterval
@@ -311,11 +308,11 @@ export default function Home() {
     // Pulizia
     return () => {
       clearTimeout(timeoutId);
-      if (renderLoopRef.current) clearInterval(renderLoopRef.current);
+      if (renderLoopRef.current) cancelAnimationFrame(renderLoopRef.current);
       if (apiLoopRef.current) clearInterval(apiLoopRef.current);
       if (window.moveInterval) clearInterval(window.moveInterval);
     };
-  }, [gameStarted, playerId, playerState, foodItems, otherPlayers, score]);
+  }, [gameStarted, playerId, playerState]);
   
   // Inizializza Pusher e sottoscrizione agli eventi
   useEffect(() => {
@@ -399,7 +396,9 @@ export default function Home() {
     if (!playerState || !gameStarted || !playerId) return;
     
     try {
-      console.log("Invio aggiornamento al server, snake position:", playerState.snake[0]);
+      // Uso di AbortController per limitare il tempo di attesa della richiesta
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
       
       const response = await fetch(`${API_BASE_URL}/api/move`, {
         method: 'POST',
@@ -415,34 +414,73 @@ export default function Home() {
             color: playerColor
           }
         }),
+        signal: controller.signal
+      }).catch(err => {
+        if (err.name === 'AbortError') {
+          console.log('Richiesta annullata per timeout');
+          return null;
+        }
+        throw err;
       });
       
-      if (!response.ok) {
-        console.error(`Errore API: ${response.status}`);
+      clearTimeout(timeoutId);
+      
+      if (!response || !response.ok) {
+        console.error(`Errore API: ${response?.status || 'Timeout'}`);
         return;
       }
       
       const data = await response.json();
-      console.log("Risposta dal server:", data);
       
-      // Aggiorna il tuo stato
-      setPlayerState(data.player);
-      setScore(data.player.score);
+      // Aggiorna solo se ci sono dati validi
+      if (data && data.player && data.player.snake) {
+        // Ottimizzazione: aggiorna solo se ci sono cambiamenti significativi
+        const currentSnakeHead = playerState.snake[0];
+        const newSnakeHead = data.player.snake[0];
+        
+        // Calcola se il punteggio è cambiato o se la posizione della testa è cambiata di più di un segmento
+        const scoreChanged = data.player.score !== playerState.score;
+        const positionChanged = !currentSnakeHead || !newSnakeHead ||
+          Math.abs(currentSnakeHead.x - newSnakeHead.x) > gridSizeRef.current ||
+          Math.abs(currentSnakeHead.y - newSnakeHead.y) > gridSizeRef.current;
+        
+        if (scoreChanged || positionChanged) {
+          setPlayerState(data.player);
+          if (scoreChanged) setScore(data.player.score);
+        }
+      }
       
-      // Aggiorna il cibo
-      if (data.foodItems) {
+      // Aggiorna il cibo solo se è cambiato
+      if (data.foodItems && JSON.stringify(data.foodItems) !== JSON.stringify(foodItems)) {
         setFoodItems(data.foodItems);
       }
       
-      // Debug info prima di aggiornare
-      console.log(`SERVER: ricevuti ${data.otherPlayers?.length || 0} altri giocatori`);
-      if (data.otherPlayers && data.otherPlayers.length > 0) {
-        console.log('IDs:', data.otherPlayers.map(p => p.id).join(', '));
-      }
-      
-      // Aggiorna gli altri giocatori solo se definito
+      // Aggiorna gli altri giocatori con un approccio più efficiente
       if (data.otherPlayers) {
-        setOtherPlayers(data.otherPlayers);
+        // Usa una funzione di reconciliation per aggiornare solo quello che è cambiato
+        setOtherPlayers(prevPlayers => {
+          // Mappa per tenere traccia dei giocatori attuali
+          const currentPlayers = new Map();
+          prevPlayers.forEach(player => {
+            if (player && player.id) {
+              currentPlayers.set(player.id, player);
+            }
+          });
+          
+          // Aggiorna o aggiungi giocatori dalla risposta del server
+          data.otherPlayers.forEach(player => {
+            if (player && player.id) {
+              currentPlayers.set(player.id, player);
+            }
+          });
+          
+          // Filtra via i giocatori che non sono più attivi
+          const activePlayerIds = new Set(data.otherPlayers.map(p => p.id));
+          const result = Array.from(currentPlayers.values())
+            .filter(p => activePlayerIds.has(p.id));
+          
+          return result;
+        });
       }
     } catch (error) {
       console.error('Errore comunicazione server:', error);
@@ -932,6 +970,7 @@ export default function Home() {
           background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
           color: var(--text-color);
           min-height: 100vh;
+          overscroll-behavior: none; /* Previene bounce effect su mobile */
         }
         
         * {
@@ -1018,6 +1057,8 @@ export default function Home() {
           image-rendering: crisp-edges;
           box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
           border-radius: 4px;
+          transform: translateZ(0); /* Attiva l'accelerazione hardware */
+          will-change: transform; /* Suggerisce al browser di ottimizzare le trasformazioni */
         }
         
         .controls-container {
@@ -1028,6 +1069,8 @@ export default function Home() {
           background-color: rgba(0, 0, 0, 0.3);
           border-radius: 15px;
           padding: 15px;
+          transform: translateZ(0); /* Attiva l'accelerazione hardware */
+          will-change: transform; /* Suggerisce al browser di ottimizzare le trasformazioni */
         }
         
         .joystick-container {
@@ -1055,6 +1098,8 @@ export default function Home() {
           border-radius: 50%;
           position: absolute;
           box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+          transform: translateZ(0); /* Attiva l'accelerazione hardware */
+          will-change: transform; /* Suggerisce al browser di ottimizzare le trasformazioni */
         }
         
         .login-container {

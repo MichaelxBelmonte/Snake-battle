@@ -17,6 +17,11 @@ const getPusherInstance = () => {
 // Importa lo stato globale dal file join.js
 import { gameState } from './join.js';
 
+// Cache delle ultime posizioni inviate per ogni giocatore per ridurre il traffico dati
+const lastPositionCache = new Map();
+// Throttle per le notifiche Pusher per evitare di sovraccaricare il server
+const lastPusherUpdate = new Map();
+
 // Genera una posizione casuale sulla griglia
 const generateRandomPosition = (excludePositions = []) => {
   const gridSize = 20;
@@ -76,6 +81,43 @@ const checkSnakeCollision = (head, snake, otherSnakes, ignoreHead = false) => {
   return false;
 };
 
+// Funzione per ottimizzare l'invio dei dati (riduce la dimensione)
+const preparePlayerData = (player) => {
+  if (!player) return null;
+  
+  return {
+    id: player.id,
+    name: player.name,
+    color: player.color,
+    snake: player.snake,
+    score: player.score
+  };
+};
+
+// Funzione per verificare se ci sono cambiamenti significativi nella posizione del giocatore
+const hasPositionChanged = (playerId, currentPosition) => {
+  if (!lastPositionCache.has(playerId)) {
+    lastPositionCache.set(playerId, currentPosition);
+    return true;
+  }
+  
+  const lastPosition = lastPositionCache.get(playerId);
+  const head = currentPosition[0];
+  const lastHead = lastPosition[0];
+  
+  // Verifica se la testa si è spostata
+  const hasChanged = 
+    !head || !lastHead || 
+    head.x !== lastHead.x || 
+    head.y !== lastHead.y;
+  
+  if (hasChanged) {
+    lastPositionCache.set(playerId, currentPosition);
+  }
+  
+  return hasChanged;
+};
+
 export default async function handler(req, res) {
   // Abilita CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -87,11 +129,11 @@ export default async function handler(req, res) {
     res.status(200).end();
     return;
   }
-  
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Metodo non consentito' });
   }
-  
+
   try {
     const { playerId, direction, playerState } = req.body;
     
@@ -104,7 +146,9 @@ export default async function handler(req, res) {
     gameState.players = gameState.players.filter(player => {
       const isActive = now - player.lastUpdate < 30000;
       if (!isActive) {
-        console.log(`Rimuovo giocatore inattivo: ${player.id}`);
+        // Rimuovi anche dalla cache quando un giocatore diventa inattivo
+        lastPositionCache.delete(player.id);
+        lastPusherUpdate.delete(player.id);
       }
       return isActive;
     });
@@ -220,27 +264,34 @@ export default async function handler(req, res) {
     // Prepara i dati per gli altri giocatori (escluso il giocatore corrente)
     const otherPlayers = gameState.players
       .filter(p => p.id !== playerId)
-      .map(p => ({
-        id: p.id,
-        name: p.name,
-        color: p.color,
-        snake: p.snake,
-        score: p.score
-      }));
+      .map(preparePlayerData);
     
-    // Configura Pusher
-    const pusher = getPusherInstance();
+    // Ottimizza l'invio dei dati: verifica se la posizione è cambiata significativamente
+    const positionChanged = hasPositionChanged(playerId, player.snake);
     
-    // Notifica tutti i client con la mossa del giocatore
-    await pusher.trigger('snake-game', 'player-moved', {
-      playerId,
-      player,
-      foodItems: gameState.foodItems,
-      otherPlayers
-    });
+    // Throttling delle notifiche Pusher: massimo una notifica ogni 500ms per giocatore
+    const shouldSendPusherUpdate = 
+      !lastPusherUpdate.has(playerId) || 
+      (now - lastPusherUpdate.get(playerId) > 500);
+    
+    // Configura Pusher e invia aggiornamento solo se necessario
+    if (positionChanged && shouldSendPusherUpdate) {
+      const pusher = getPusherInstance();
+      
+      // Memorizza l'ultimo timestamp di aggiornamento
+      lastPusherUpdate.set(playerId, now);
+      
+      // Notifica tutti i client con la mossa del giocatore
+      await pusher.trigger('snake-game', 'player-moved', {
+        playerId,
+        player: preparePlayerData(player),
+        foodItems: gameState.foodItems,
+        otherPlayers
+      });
+    }
     
     return res.status(200).json({
-      player,
+      player: preparePlayerData(player),
       foodItems: gameState.foodItems,
       otherPlayers
     });

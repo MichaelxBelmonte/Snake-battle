@@ -76,7 +76,7 @@ export const gameState = {
 
 // Genera cibo iniziale
 if (gameState.foodItems.length === 0) {
-    // Genera da 3 a 5 elementi cibo
+    // Genera 5 elementi cibo
     const foodCount = gameState.maxFood;
     for (let i = 0; i < foodCount; i++) {
         const occupiedPositions = [
@@ -86,6 +86,24 @@ if (gameState.foodItems.length === 0) {
         gameState.foodItems.push(generateRandomPosition(occupiedPositions));
     }
 }
+
+// Funzione per ottimizzare l'invio dei dati (riduce la dimensione)
+const preparePlayerData = (player) => {
+    if (!player) return null;
+    
+    return {
+        id: player.id,
+        name: player.name,
+        color: player.color,
+        snake: player.snake,
+        score: player.score
+    };
+};
+
+// Genera un ID univoco per il giocatore
+const generatePlayerId = () => {
+    return Date.now().toString() + Math.random().toString(36).substr(2, 5);
+};
 
 export default async function handler(req, res) {
     // Abilita CORS
@@ -112,35 +130,34 @@ export default async function handler(req, res) {
         
         // Pulisci i giocatori inattivi (non aggiornati negli ultimi 30 secondi)
         const now = Date.now();
-        gameState.players = gameState.players.filter(player => {
-            const isActive = now - player.lastUpdate < 30000;
-            if (!isActive) {
-                console.log(`Rimuovo giocatore inattivo: ${player.id}`);
-            }
-            return isActive;
-        });
+        const inactiveCount = gameState.players.filter(player => now - player.lastUpdate >= 30000).length;
         
-        // Verifica se il giocatore esiste già
+        if (inactiveCount > 0) {
+            // Rimuovi giocatori inattivi solo se necessario per migliorare le performance
+            gameState.players = gameState.players.filter(player => now - player.lastUpdate < 30000);
+        }
+        
+        // Verifica se il giocatore esiste già - prima controlla per nome, poi considera anche altri fattori
         let player = gameState.players.find(p => p.name === playerName);
         
         if (player) {
             // Aggiorna il colore se è cambiato
             player.color = playerColor;
-            player.lastUpdate = Date.now();
+            player.lastUpdate = now;
         } else {
             // Verifica se è stato raggiunto il limite massimo di giocatori
             if (gameState.players.length >= gameState.maxPlayers) {
                 return res.status(400).json({ error: 'Numero massimo di giocatori raggiunto' });
             }
             
-            // Genera una posizione iniziale casuale
+            // Genera una posizione iniziale sicura
             const initialPosition = generateRandomPosition(
                 gameState.players.flatMap(p => p.snake || []).concat(gameState.foodItems)
             );
             
-            // Crea un nuovo giocatore
+            // Crea un nuovo giocatore con un ID univoco
             player = {
-                id: Date.now().toString(),
+                id: generatePlayerId(),
                 name: playerName,
                 color: playerColor,
                 snake: [
@@ -149,7 +166,7 @@ export default async function handler(req, res) {
                     { x: initialPosition.x - 40, y: initialPosition.y }
                 ],
                 score: 0,
-                lastUpdate: Date.now()
+                lastUpdate: now
             };
             
             // Aggiungi il nuovo giocatore allo stato di gioco
@@ -168,26 +185,20 @@ export default async function handler(req, res) {
         // Prepara i dati per gli altri giocatori (escluso il giocatore corrente)
         const otherPlayers = gameState.players
             .filter(p => p.id !== player.id)
-            .map(p => ({
-                id: p.id,
-                name: p.name,
-                color: p.color,
-                snake: p.snake,
-                score: p.score
-            }));
+            .map(preparePlayerData);
         
         // Configura Pusher
         const pusher = getPusherInstance();
         
         // Notifica tutti i client che un nuovo giocatore si è unito
         await pusher.trigger('snake-game', 'player-joined', {
-            player,
+            player: preparePlayerData(player),
             foodItems: gameState.foodItems,
             otherPlayers // Includi tutti gli altri giocatori nell'evento
         });
         
         return res.status(200).json({
-            player,
+            player: preparePlayerData(player),
             foodItems: gameState.foodItems,
             otherPlayers // Includi tutti gli altri giocatori nella risposta
         });
