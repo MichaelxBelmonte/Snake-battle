@@ -85,7 +85,7 @@ export default function Home() {
       // Loop di rendering con requestAnimationFrame per migliori performance
       let lastRenderTime = 0;
       let frameId;
-      const fpsLimit = isMobile ? 20 : 30; // Meno FPS su mobile per migliorare performance
+      const fpsLimit = isMobile ? 15 : 25; // Riduco ulteriormente gli FPS per migliorare performance
       const frameInterval = 1000 / fpsLimit;
       
       const renderLoop = (timestamp) => {
@@ -160,6 +160,9 @@ export default function Home() {
           });
         }
         
+        // Debug counter per altri giocatori
+        let visiblePlayers = 0;
+        
         // Disegna gli altri serpenti
         if (otherPlayers && otherPlayers.length > 0) {
           console.log(`Rendering ${otherPlayers.length} altri giocatori`);
@@ -167,18 +170,23 @@ export default function Home() {
           otherPlayers.forEach(player => {
             // Verifica più rigorosa degli altri giocatori
             if (player && player.id && player.snake && player.snake.length > 0) {
-              // Disegna il nome
+              visiblePlayers++;
+              
+              // Disegna il nome con sfondo per maggiore visibilità
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+              ctx.fillRect(player.snake[0].x - 40, player.snake[0].y - 20, 80, 16);
+              
               ctx.fillStyle = 'white';
               ctx.font = '12px Arial';
               ctx.textAlign = 'center';
-              ctx.fillText(player.name || 'Giocatore', player.snake[0].x + gridSize/2, player.snake[0].y - 5);
+              ctx.fillText(player.name || 'Giocatore', player.snake[0].x + gridSize/2, player.snake[0].y - 8);
               
               // Disegna il serpente con contorno più visibile
               player.snake.forEach((segment, i) => {
                 if (!segment) return;
                 
                 // Bordo più grande e visibile
-                ctx.lineWidth = 3;
+                ctx.lineWidth = 4;
                 ctx.strokeStyle = 'white';
                 ctx.beginPath();
                 ctx.arc(
@@ -212,10 +220,13 @@ export default function Home() {
         // Disegna il proprio serpente
         if (playerState && playerState.snake && playerState.snake.length > 0) {
           // Disegna il nome
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          ctx.fillRect(playerState.snake[0].x - 40, playerState.snake[0].y - 20, 80, 16);
+          
           ctx.fillStyle = 'white';
           ctx.font = '12px Arial';
           ctx.textAlign = 'center';
-          ctx.fillText(playerName || 'Tu', playerState.snake[0].x + gridSize/2, playerState.snake[0].y - 5);
+          ctx.fillText(playerName || 'Tu', playerState.snake[0].x + gridSize/2, playerState.snake[0].y - 8);
           
           // Disegna il serpente con colore più luminoso per renderlo più visibile
           playerState.snake.forEach((segment, i) => {
@@ -265,7 +276,7 @@ export default function Home() {
         ctx.fillText(`Punteggio: ${score}`, 10, 25);
         
         ctx.textAlign = 'right';
-        ctx.fillText(`Giocatori: ${otherPlayers.length + 1}`, canvas.width - 10, 25);
+        ctx.fillText(`Giocatori visibili: ${visiblePlayers + 1}/${otherPlayers.length + 1}`, canvas.width - 10, 25);
       };
       
       // Avvia il loop di rendering
@@ -314,10 +325,10 @@ export default function Home() {
         lastDirectionRef.current = directionRef.current;
       }, 1000 / 5); // 5 FPS (più lento e stabile)
       
-      // Comunicazione col server - più lento per ridurre il carico
+      // Comunicazione col server - più veloce per migliorare l'esperienza multiplayer
       const serverInterval = setInterval(() => {
         updateWithServer();
-      }, 1500); // Una volta ogni 1.5 secondi
+      }, 1000); // Una volta ogni secondo invece di 1.5s
       
       // Memorizza gli intervalli per la pulizia
       renderLoopRef.current = frameId;
@@ -349,19 +360,34 @@ export default function Home() {
       // Resetta lo stato degli other players
       setOtherPlayers([]);
       
-      // Inizializza Pusher
+      // Inizializza Pusher con opzioni ottimizzate
       const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
         cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+        enabledTransports: ['ws', 'wss'], // Preferisci WebSocket per migliori performance
+        wsHost: process.env.NEXT_PUBLIC_PUSHER_HOST || undefined,
+        wsPort: process.env.NEXT_PUBLIC_PUSHER_PORT || undefined
       });
       
       // Sottoscrivi al canale
       const channel = pusher.subscribe('snake-game');
       
+      // Heartbeat per mantenere connessione attiva
+      const heartbeatInterval = setInterval(() => {
+        if (pusher.connection.state === 'connected') {
+          console.log('Pusher: connessione attiva');
+        } else {
+          console.warn('Pusher: stato connessione:', pusher.connection.state);
+          // Tentativo di riconnessione
+          if (pusher.connection.state === 'disconnected') {
+            console.log('Tentativo di riconnessione...');
+            pusher.connect();
+          }
+        }
+      }, 30000); // Ogni 30 secondi
+      
       // Gestisci l'evento player-joined
       channel.bind('player-joined', (data) => {
         if (!data) return;
-        
-        console.log(`Ricevuto aggiornamento nuovo giocatore`);
         
         // Aggiorna il cibo
         if (data.foodItems) {
@@ -370,15 +396,17 @@ export default function Home() {
         
         // Aggiungi il nuovo giocatore allo stato
         if (data.player && data.player.id !== playerId) {
-          console.log('Nuovo giocatore:', data.player.id);
-          
           setOtherPlayers(prev => {
             // Usa un Map per una riconciliazione più efficiente
             const playersMap = new Map(prev.map(p => [p.id, p]));
             
             // Verifica se il giocatore ha dati validi
             if (data.player && data.player.snake && data.player.snake.length > 0) {
-              playersMap.set(data.player.id, data.player);
+              // Aggiungi timestamp per tracciare l'attività
+              playersMap.set(data.player.id, {
+                ...data.player,
+                lastUpdate: Date.now()
+              });
             }
             
             // Ritorna l'array aggiornato
@@ -388,17 +416,21 @@ export default function Home() {
         
         // Aggiorna tutti gli altri giocatori quando arrivano i dati completi
         if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-          console.log(`Aggiornamento lista completa: ${data.otherPlayers.length} giocatori`);
-          setOtherPlayers(data.otherPlayers);
+          // Filtra il giocatore corrente e aggiungi timestamp
+          const filteredPlayers = data.otherPlayers
+            .filter(p => p.id !== playerId)
+            .map(p => ({
+              ...p,
+              lastUpdate: Date.now()
+            }));
+            
+          setOtherPlayers(filteredPlayers);
         }
       });
       
       // Gestisci l'evento player-moved
       channel.bind('player-moved', (data) => {
         if (!data) return;
-        
-        // Aggiungi logging per debug
-        console.log(`Ricevuto aggiornamento giocatore: ${data.playerId}`);
         
         // Aggiorna SEMPRE il cibo, non solo quando c'è un altro giocatore
         if (data.foodItems) {
@@ -413,7 +445,28 @@ export default function Home() {
             
             // Verifica se il giocatore ha dati validi
             if (data.player && data.player.snake && data.player.snake.length > 0) {
-              playersMap.set(data.playerId, data.player);
+              // Calcola la direzione se non è fornita
+              let direction = data.player.direction;
+              const existingPlayer = playersMap.get(data.playerId);
+              
+              if (existingPlayer && existingPlayer.snake && existingPlayer.snake.length > 0) {
+                const oldHead = existingPlayer.snake[0];
+                const newHead = data.player.snake[0];
+                
+                if (!direction && oldHead && newHead) {
+                  if (newHead.x > oldHead.x) direction = 'right';
+                  else if (newHead.x < oldHead.x) direction = 'left';
+                  else if (newHead.y > oldHead.y) direction = 'down';
+                  else if (newHead.y < oldHead.y) direction = 'up';
+                }
+              }
+              
+              // Aggiorna il giocatore con la direzione e timestamp
+              playersMap.set(data.playerId, {
+                ...data.player,
+                direction: direction || 'right',
+                lastUpdate: Date.now()
+              });
             }
             
             // Ritorna l'array aggiornato
@@ -423,8 +476,15 @@ export default function Home() {
         
         // Aggiorna anche tutti gli altri giocatori quando arrivano i dati completi
         if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-          console.log(`Aggiornamento lista completa: ${data.otherPlayers.length} giocatori`);
-          setOtherPlayers(data.otherPlayers);
+          // Filtra il giocatore corrente e aggiungi timestamp
+          const filteredPlayers = data.otherPlayers
+            .filter(p => p.id !== playerId)
+            .map(p => ({
+              ...p,
+              lastUpdate: Date.now()
+            }));
+            
+          setOtherPlayers(filteredPlayers);
         }
       });
       
@@ -437,6 +497,7 @@ export default function Home() {
         channel.unbind_all();
         channel.unsubscribe();
         pusher.disconnect();
+        clearInterval(heartbeatInterval);
       };
     } catch (error) {
       console.error('Errore inizializzazione Pusher:', error);
@@ -453,6 +514,20 @@ export default function Home() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       
+      // Per ottimizzare, inviamo solo le informazioni essenziali
+      // - Solo la testa del serpente invece dell'intero array
+      // - Dati minimali per ridurre il traffico di rete
+      const optimizedState = {
+        id: playerId,
+        name: playerName,
+        color: playerColor,
+        score: playerState.score || 0,
+        // Invia solo la testa e la lunghezza invece dell'intero serpente
+        head: playerState.snake[0],
+        length: playerState.snake.length,
+        direction: directionRef.current
+      };
+      
       const response = await fetch(`${API_BASE_URL}/api/move`, {
         method: 'POST',
         headers: {
@@ -461,11 +536,7 @@ export default function Home() {
         body: JSON.stringify({
           playerId,
           direction: directionRef.current,
-          playerState: {
-            ...playerState,
-            name: playerName,
-            color: playerColor
-          }
+          playerState: optimizedState
         }),
         signal: controller.signal
       }).catch(err => {
@@ -516,29 +587,118 @@ export default function Home() {
           const currentPlayers = new Map();
           prevPlayers.forEach(player => {
             if (player && player.id) {
-              currentPlayers.set(player.id, player);
+              // Implementa predizione del movimento per altri giocatori
+              // Se il giocatore ha direzione e testa, anticipa la sua posizione
+              if (player.direction && player.snake && player.snake.length > 0) {
+                const predictedPlayer = {...player};
+                const head = {...predictedPlayer.snake[0]};
+                const gridSize = gridSizeRef.current;
+                
+                // Predici la posizione futura in base alla direzione
+                // Questo riduce la percezione di lag tra aggiornamenti
+                switch (player.direction) {
+                  case 'up':
+                    head.y -= gridSize;
+                    if (head.y < 0) head.y = 600 - gridSize;
+                    break;
+                  case 'down':
+                    head.y += gridSize;
+                    if (head.y >= 600) head.y = 0;
+                    break;
+                  case 'left':
+                    head.x -= gridSize;
+                    if (head.x < 0) head.x = 800 - gridSize;
+                    break;
+                  case 'right':
+                    head.x += gridSize;
+                    if (head.x >= 800) head.x = 0;
+                    break;
+                }
+                
+                // Aggiorna il serpente con la posizione predetta
+                predictedPlayer.snake = [head, ...predictedPlayer.snake.slice(0, -1)];
+                currentPlayers.set(player.id, predictedPlayer);
+              } else {
+                currentPlayers.set(player.id, player);
+              }
             }
           });
           
           // Aggiorna o aggiungi giocatori dalla risposta del server
           data.otherPlayers.forEach(player => {
-            if (player && player.id) {
-              currentPlayers.set(player.id, player);
+            if (player && player.id && player.id !== playerId) {
+              // Se abbiamo già questo giocatore e ha dati validi, aggiorna solo i cambiamenti
+              const existingPlayer = currentPlayers.get(player.id);
+              
+              // Aggiorna il giocatore solo se è necessario, altrimenti mantieni la predizione
+              if (!existingPlayer || 
+                  JSON.stringify(existingPlayer.snake[0]) !== JSON.stringify(player.snake[0]) ||
+                  existingPlayer.score !== player.score) {
+                
+                // Memorizza la direzione attuale per la predizione futura
+                // Calcola la direzione dal movimento della testa
+                if (existingPlayer && existingPlayer.snake && player.snake) {
+                  const oldHead = existingPlayer.snake[0];
+                  const newHead = player.snake[0];
+                  if (oldHead && newHead) {
+                    let direction = player.direction || existingPlayer.direction;
+                    
+                    // Calcola la direzione se non fornita dal server
+                    if (!direction) {
+                      if (newHead.x > oldHead.x) direction = 'right';
+                      else if (newHead.x < oldHead.x) direction = 'left';
+                      else if (newHead.y > oldHead.y) direction = 'down';
+                      else if (newHead.y < oldHead.y) direction = 'up';
+                    }
+                    
+                    // Aggiorna con direzione calcolata
+                    currentPlayers.set(player.id, {...player, direction});
+                  } else {
+                    currentPlayers.set(player.id, player);
+                  }
+                } else {
+                  currentPlayers.set(player.id, player);
+                }
+              }
             }
           });
           
-          // Filtra via i giocatori che non sono più attivi
+          // Filtra via i giocatori che non sono più attivi o che sono il giocatore corrente
           const activePlayerIds = new Set(data.otherPlayers.map(p => p.id));
           const result = Array.from(currentPlayers.values())
-            .filter(p => activePlayerIds.has(p.id));
+            .filter(p => activePlayerIds.has(p.id) && p.id !== playerId);
           
-          return result;
+          // Aggiunge timestamp per il sistema di pulizia giocatori inattivi
+          return result.map(player => ({
+            ...player,
+            lastUpdate: Date.now()
+          }));
         });
       }
     } catch (error) {
       console.error('Errore comunicazione server:', error);
     }
   };
+  
+  // Nuovo effetto per pulire i giocatori inattivi
+  useEffect(() => {
+    if (!gameStarted) return;
+    
+    // Controlla e rimuovi i giocatori inattivi ogni 10 secondi
+    const cleanupInterval = setInterval(() => {
+      setOtherPlayers(prev => {
+        const now = Date.now();
+        // Rimuovi giocatori che non hanno inviato aggiornamenti negli ultimi 15 secondi
+        return prev.filter(player => {
+          return player && player.lastUpdate && (now - player.lastUpdate) < 15000;
+        });
+      });
+    }, 10000);
+    
+    return () => {
+      clearInterval(cleanupInterval);
+    };
+  }, [gameStarted]);
   
   // Gestione input da tastiera
   useEffect(() => {
