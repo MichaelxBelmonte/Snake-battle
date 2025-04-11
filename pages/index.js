@@ -75,6 +75,11 @@ export default function Home() {
   const foodCanvasRef = useRef(null);
   const otherPlayersCanvasRef = useRef(null);
 
+  // Aggiungo stato per tracciare la connessione e debug
+  const [connectionStatus, setConnectionStatus] = useState('disconnesso');
+  const [lastMessageTime, setLastMessageTime] = useState(null);
+  const [debugMode, setDebugMode] = useState(process.env.NODE_ENV !== 'production');
+  
   // Rileva dispositivo mobile al caricamento
   useEffect(() => {
     setIsMobile(isMobileDevice());
@@ -426,6 +431,9 @@ export default function Home() {
         const visiblePlayers = bufferCtx.playerCount || 0;
         bufferCtx.fillText(`Giocatori: ${visiblePlayers + 1}`, canvas.width - 10, 25);
         
+        // Debug info per multiplayer
+        renderDebugInfo(bufferCtx, canvas, otherPlayers, visiblePlayers);
+        
         // FPS counter (solo in sviluppo)
         if (process.env.NODE_ENV !== 'production') {
           if (frameCount % 30 === 0) {
@@ -534,7 +542,8 @@ export default function Home() {
         score: score,
         headPos: playerState.snake[0],
         length: playerState.snake.length,
-        direction: directionRef.current
+        direction: directionRef.current,
+        timestamp: Date.now() // Aggiungi timestamp per debugging
       };
       
       const response = await fetch(`${API_BASE_URL}/api/move`, {
@@ -571,8 +580,15 @@ export default function Home() {
       
       // Aggiorna gli altri giocatori - adatto per rendering frequente
       if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-        // Filtro semplice per rimuovere il giocatore attuale
-        setOtherPlayers(data.otherPlayers.filter(p => p.id !== playerId));
+        // Filtro stretto e verifica esplicita che non ci siamo noi stessi
+        const myId = playerId; // Esplicito per evitare problemi di closure
+        const filteredPlayers = data.otherPlayers.filter(p => p && p.id && p.id !== myId);
+        setOtherPlayers(filteredPlayers);
+        
+        // Debug log, solo occasionalmente
+        if (debugMode && Math.random() < 0.05) {
+          console.log(`Server: ${data.otherPlayers.length} giocatori, dopo filtro: ${filteredPlayers.length}`);
+        }
       }
     } catch (error) {
       console.error('Errore comunicazione server:', error);
@@ -586,48 +602,109 @@ export default function Home() {
     try {
       // Resetta lo stato degli other players
       setOtherPlayers([]);
+      setConnectionStatus('connessione...');
       
       // Inizializza Pusher con opzioni ottimizzate
       const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
         cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
-        enabledTransports: ['ws', 'wss'], // Preferisci WebSocket 
+        enabledTransports: ['ws', 'wss'], // Preferisci WebSocket
+        authEndpoint: `${API_BASE_URL}/api/pusher/auth`, // Endpoint per autenticazione (opzionale)
+        auth: {
+          headers: {
+            'X-Player-ID': playerId // Invia l'ID del giocatore per autenticazione
+          }
+        },
       });
       
       // Sottoscrivi al canale
       const channel = pusher.subscribe('snake-game');
       
+      // Ping/pong per verificare stato connessione
+      const pingInterval = setInterval(() => {
+        // Invia un piccolo ping al server per mantenere viva la connessione
+        fetch(`${API_BASE_URL}/api/ping`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ playerId })
+        }).catch(err => console.log('Errore ping:', err));
+        
+        // Verifica quanto tempo è passato dall'ultimo messaggio
+        if (lastMessageTime) {
+          const now = Date.now();
+          const elapsed = now - lastMessageTime;
+          if (elapsed > 10000) { // 10 secondi senza messaggi
+            setConnectionStatus('inattivo');
+          }
+        }
+      }, 5000);
+      
       // Log dello stato della connessione
       pusher.connection.bind('state_change', (states) => {
         console.log('Stato connessione Pusher:', states.current);
+        setConnectionStatus(states.current);
+        
+        // Se la connessione è stata stabilita, aggiorna il timestamp
+        if (states.current === 'connected') {
+          setLastMessageTime(Date.now());
+        }
       });
       
       // Gestisci l'evento player-joined
       channel.bind('player-joined', (data) => {
         if (!data) return;
+        setLastMessageTime(Date.now());
+        
+        console.log('Ricevuto evento player-joined:', 
+          data.player ? data.player.id : 'nessun player',
+          'Altri giocatori:', data.otherPlayers ? data.otherPlayers.length : 0);
         
         // Aggiorna il cibo
         if (data.foodItems) {
           setFoodItems(data.foodItems);
         }
         
-        // Aggiorna i giocatori
+        // Aggiorna i giocatori - verifica esplicitamente che non siamo noi
         if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-          setOtherPlayers(data.otherPlayers.filter(p => p.id !== playerId));
+          const filtered = data.otherPlayers.filter(p => p && p.id && p.id !== playerId);
+          console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
+          setOtherPlayers(filtered);
         }
       });
       
       // Gestisci l'evento player-moved
       channel.bind('player-moved', (data) => {
         if (!data) return;
+        setLastMessageTime(Date.now());
+        
+        // Log meno frequente per non intasare la console
+        if (debugMode && Math.random() < 0.1) {
+          console.log('Ricevuto evento player-moved:', 
+            data.playerId,
+            'Altri giocatori:', data.otherPlayers ? data.otherPlayers.length : 0);
+        }
         
         // Aggiorna il cibo
         if (data.foodItems) {
           setFoodItems(data.foodItems);
         }
         
-        // Aggiorna giocatori
+        // Aggiorna giocatori - con controllo più stretto
         if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-          setOtherPlayers(data.otherPlayers.filter(p => p.id !== playerId));
+          const myId = playerId;
+          const filtered = data.otherPlayers.filter(p => p && p.id && p.id !== myId);
+          
+          // Solo in debug mode
+          if (debugMode && Math.random() < 0.05) {
+            console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
+            if (filtered.length > 0) {
+              console.log('Esempio serpente:', filtered[0].snake ? 
+                `${filtered[0].snake.length} segmenti` : 'nessun serpente');
+            }
+          }
+          
+          setOtherPlayers(filtered);
         }
       });
       
@@ -637,15 +714,18 @@ export default function Home() {
       // Disconnetti al termine
       return () => {
         console.log('Disconnessione Pusher');
+        clearInterval(pingInterval);
         channel.unbind_all();
         channel.unsubscribe();
         pusher.disconnect();
+        setConnectionStatus('disconnesso');
       };
     } catch (error) {
       console.error('Errore inizializzazione Pusher:', error);
       setError('Errore di connessione: ricarica la pagina');
+      setConnectionStatus('errore');
     }
-  }, [gameStarted, playerId]);
+  }, [gameStarted, playerId, lastMessageTime, debugMode]);
   
   // Nuovo effetto per pulire i giocatori inattivi
   useEffect(() => {
@@ -1062,6 +1142,35 @@ export default function Home() {
     }
   };
   
+  // Renderizza informazioni di debug nel canvas
+  const renderDebugInfo = (bufferCtx, canvas, otherPlayers, visiblePlayers) => {
+    if (!debugMode) return;
+    
+    const now = Date.now();
+    const connectionAge = lastMessageTime ? Math.floor((now - lastMessageTime) / 1000) : 'N/A';
+    
+    bufferCtx.fillStyle = connectionStatus === 'connected' ? '#00ff00' : 
+                         (connectionStatus === 'connecting' ? '#ffff00' : '#ff0000');
+    bufferCtx.font = '12px monospace';
+    bufferCtx.textAlign = 'left';
+    bufferCtx.fillText(`Connessione: ${connectionStatus} (${connectionAge}s)`, 10, 65);
+    bufferCtx.fillText(`ID: ${playerId?.substring(0,8)}`, 10, 80);
+    bufferCtx.fillText(`Altri: ${otherPlayers?.length || 0} (visibili: ${visiblePlayers})`, 10, 95);
+    
+    // Visualizza le coordinate di alcuni giocatori per debug
+    if (otherPlayers && otherPlayers.length > 0) {
+      otherPlayers.slice(0, 2).forEach((player, idx) => {
+        if (player && player.snake && player.snake.length > 0) {
+          const head = player.snake[0];
+          bufferCtx.fillText(
+            `P${idx+1}: (${head.x},${head.y})`, 
+            10, 110 + idx * 15
+          );
+        }
+      });
+    }
+  };
+  
   return (
     <div className="container">
       <h1>Snake Battle</h1>
@@ -1129,6 +1238,18 @@ export default function Home() {
                 <p>Usa le frecce direzionali ↑ ↓ ← → per muovere il serpente</p>
               )}
             </div>
+            
+            <div className="connection-status">
+              <span className={`status-indicator ${connectionStatus}`}></span>
+              <span>Stato: {connectionStatus}</span>
+              <button 
+                className="debug-button"
+                onClick={() => setDebugMode(!debugMode)}
+              >
+                {debugMode ? 'Disattiva Debug' : 'Attiva Debug'}
+              </button>
+            </div>
+            
             {error && <p className="error">{error}</p>}
           </div>
         </div>
@@ -1359,6 +1480,53 @@ export default function Home() {
           color: var(--text-secondary);
           text-align: center;
           margin-top: 0.5rem;
+        }
+        
+        .connection-status {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          margin-top: 10px;
+          font-size: 0.9rem;
+          color: var(--text-secondary);
+        }
+        
+        .status-indicator {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          display: inline-block;
+        }
+        
+        .status-indicator.connected {
+          background-color: #22c55e;
+          box-shadow: 0 0 5px #22c55e;
+        }
+        
+        .status-indicator.connecting {
+          background-color: #eab308;
+          box-shadow: 0 0 5px #eab308;
+        }
+        
+        .status-indicator.disconnesso, .status-indicator.errore, .status-indicator.inattivo {
+          background-color: #ef4444;
+          box-shadow: 0 0 5px #ef4444;
+        }
+        
+        .debug-button {
+          background-color: #333;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          padding: 4px 8px;
+          font-size: 0.8rem;
+          cursor: pointer;
+          margin-left: 10px;
+        }
+        
+        .debug-button:hover {
+          background-color: #555;
         }
         
         /* Media query per dispositivi mobili */
