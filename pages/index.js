@@ -69,10 +69,71 @@ export default function Home() {
   const lastDirectionRef = useRef('right');
   const gridSizeRef = useRef(20); // Dimensione della griglia costante
   
+  // Canvas buffer per rendering offscreen
+  const bufferCanvasRef = useRef(null);
+  const staticElementsRef = useRef(null);
+  const foodCanvasRef = useRef(null);
+  const otherPlayersCanvasRef = useRef(null);
+
   // Rileva dispositivo mobile al caricamento
   useEffect(() => {
     setIsMobile(isMobileDevice());
+    
+    // Inizializza i buffer canvas per il rendering ottimizzato
+    bufferCanvasRef.current = document.createElement('canvas');
+    bufferCanvasRef.current.width = 800;
+    bufferCanvasRef.current.height = 600;
+    
+    staticElementsRef.current = document.createElement('canvas');
+    staticElementsRef.current.width = 800;
+    staticElementsRef.current.height = 600;
+    
+    foodCanvasRef.current = document.createElement('canvas');
+    foodCanvasRef.current.width = 800;
+    foodCanvasRef.current.height = 600;
+    
+    otherPlayersCanvasRef.current = document.createElement('canvas');
+    otherPlayersCanvasRef.current.width = 800;
+    otherPlayersCanvasRef.current.height = 600;
+    
+    // Pre-rendering degli elementi statici
+    preRenderStaticElements();
   }, []);
+  
+  // Pre-rendering degli elementi statici (sfondo e griglia)
+  const preRenderStaticElements = () => {
+    if (!staticElementsRef.current) return;
+    
+    const ctx = staticElementsRef.current.getContext('2d', { alpha: false });
+    const canvas = staticElementsRef.current;
+    const gridSize = gridSizeRef.current;
+    
+    // Sfondo nero solido (più veloce)
+    ctx.fillStyle = '#121212';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Disegna griglia solo su desktop e solo una volta
+    if (!isMobile) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.lineWidth = 0.5;
+      
+      // Disegna linee verticali
+      for (let x = 0; x <= canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      
+      // Disegna linee orizzontali
+      for (let y = 0; y <= canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+    }
+  };
   
   // Loop di gioco con setInterval (più stabile)
   useEffect(() => {
@@ -82,210 +143,306 @@ export default function Home() {
     
     // Piccolo ritardo prima di avviare i loop per garantire che lo stato sia aggiornato
     const startGameLoops = () => {
+      // Pre-rendering degli elementi statici
+      preRenderStaticElements();
+      
       // Loop di rendering con requestAnimationFrame per migliori performance
       let lastRenderTime = 0;
       let frameId;
-      // Framerate fisso basato sul dispositivo
-      const fpsLimit = isMobile ? 30 : 60;
+      let frameCount = 0;
+      let lastFoodRenderTime = 0;
+      let lastOtherPlayersRenderTime = 0;
+      
+      // Framerate ottimizzato per il dispositivo
+      const fpsLimit = isMobile ? 40 : 60;
       const frameInterval = 1000 / fpsLimit;
+      
+      // Frequenza di aggiornamento ridotta per elementi non critici
+      const foodUpdateInterval = 500; // Aggiorna il cibo ogni 500ms
+      const otherPlayersUpdateInterval = isMobile ? 200 : 100; // Aggiorna altri giocatori con frequenza diversa
       
       const renderLoop = (timestamp) => {
         frameId = requestAnimationFrame(renderLoop);
         const elapsed = timestamp - lastRenderTime;
         
-        // Limita gli FPS per migliorare le performance
+        // Limita gli FPS per stabilizzare le performance
         if (elapsed < frameInterval) return;
         
+        // Calcola il delta time per animazioni fluide indipendenti dal framerate
+        const deltaTime = elapsed / 1000;
         lastRenderTime = timestamp - (elapsed % frameInterval);
+        frameCount++;
         
         const canvas = canvasRef.current;
         if (!canvas) return;
         
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: false });
         if (!ctx) return;
         
-        // Ridurre la qualità visiva per migliorare le prestazioni su mobile
+        // Ottimizzazioni rendering
         if (isMobile) {
-          ctx.imageSmoothingEnabled = false; // Disabilita antialiasing per migliorare performance
+          ctx.imageSmoothingEnabled = false;
         }
         
         // Verifica che playerState.snake sia disponibile
         if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
         
-        // Clear canvas - uso clearRect più efficiente
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Usa il buffer canvas per il rendering fuori schermo (molto più veloce)
+        const bufferCtx = bufferCanvasRef.current.getContext('2d', { alpha: false });
         
-        // Dimensione della griglia costante per il rendering
+        // Clear buffer canvas
+        bufferCtx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Dimensione della griglia
         const gridSize = gridSizeRef.current;
         
-        // Sfondo - semplificato per migliorare performance
-        ctx.fillStyle = '#121212';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // 1. Disegna elementi statici (sfondo e griglia) dal pre-rendered canvas
+        bufferCtx.drawImage(staticElementsRef.current, 0, 0);
         
-        // Disegna griglia solo su desktop
-        if (!isMobile) {
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-          ctx.lineWidth = 0.5;
-          
-          for (let x = 0; x <= canvas.width; x += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvas.height);
-            ctx.stroke();
-          }
-          
-          for (let y = 0; y <= canvas.height; y += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
-            ctx.stroke();
-          }
-        }
+        // 2. Aggiorna e disegna il cibo solo quando necessario (meno frequente)
+        const shouldUpdateFood = timestamp - lastFoodRenderTime > foodUpdateInterval;
         
-        // Disegna il cibo - ottimizzato
-        if (foodItems && foodItems.length > 0) {
-          ctx.fillStyle = '#e73c3e'; // Rosso per il cibo
+        if (shouldUpdateFood && foodItems && foodItems.length > 0) {
+          const foodCtx = foodCanvasRef.current.getContext('2d', { alpha: true });
+          foodCtx.clearRect(0, 0, canvas.width, canvas.height);
+          foodCtx.fillStyle = '#e73c3e';
           
           foodItems.forEach(food => {
             if (!food) return;
             
-            ctx.beginPath();
-            ctx.arc(
+            // Controlla se il cibo è visibile
+            if (food.x < -gridSize || food.x > canvas.width + gridSize || 
+                food.y < -gridSize || food.y > canvas.height + gridSize) {
+              return;
+            }
+            
+            foodCtx.beginPath();
+            foodCtx.arc(
               food.x + gridSize/2,
               food.y + gridSize/2,
               gridSize/2 - 2,
               0,
               Math.PI * 2
             );
-            ctx.fill();
+            foodCtx.fill();
           });
+          
+          lastFoodRenderTime = timestamp;
         }
         
-        // Debug counter per altri giocatori
-        let visiblePlayers = 0;
+        // Disegna il cibo dal buffer
+        bufferCtx.drawImage(foodCanvasRef.current, 0, 0);
         
-        // Disegna gli altri serpenti
-        if (otherPlayers && otherPlayers.length > 0) {
-          otherPlayers.forEach(player => {
+        // 3. Aggiorna e disegna altri giocatori solo quando necessario
+        const shouldUpdateOtherPlayers = timestamp - lastOtherPlayersRenderTime > otherPlayersUpdateInterval;
+        
+        if (shouldUpdateOtherPlayers && otherPlayers && otherPlayers.length > 0) {
+          const otherPlayersCtx = otherPlayersCanvasRef.current.getContext('2d', { alpha: true });
+          otherPlayersCtx.clearRect(0, 0, canvas.width, canvas.height);
+          
+          // Calcola il campo visivo del giocatore (per ottimizzare rendering)
+          let visiblePlayers = 0;
+          const viewportPadding = 100; // Padding extra oltre il viewport
+          const viewportRect = {
+            x: -viewportPadding,
+            y: -viewportPadding,
+            width: canvas.width + (viewportPadding * 2),
+            height: canvas.height + (viewportPadding * 2)
+          };
+          
+          // Rendering prioritario: serpi più vicini prima
+          const sortedPlayers = [...otherPlayers].sort((a, b) => {
+            if (!a.snake || !a.snake[0] || !b.snake || !b.snake[0]) return 0;
+            if (!playerState.snake || !playerState.snake[0]) return 0;
+            
+            const playerHead = playerState.snake[0];
+            const distA = Math.sqrt(
+              Math.pow(a.snake[0].x - playerHead.x, 2) + 
+              Math.pow(a.snake[0].y - playerHead.y, 2)
+            );
+            const distB = Math.sqrt(
+              Math.pow(b.snake[0].x - playerHead.x, 2) + 
+              Math.pow(b.snake[0].y - playerHead.y, 2)
+            );
+            
+            return distA - distB; // I più vicini prima
+          });
+          
+          sortedPlayers.forEach(player => {
             // Verifica più rigorosa degli altri giocatori
             if (player && player.id && player.snake && player.snake.length > 0) {
+              // Verifica se il giocatore è visibile (nel viewport)
+              const head = player.snake[0];
+              const isVisible = 
+                head.x >= viewportRect.x && head.x <= viewportRect.x + viewportRect.width &&
+                head.y >= viewportRect.y && head.y <= viewportRect.y + viewportRect.height;
+              
+              if (!isVisible) return; // Salta giocatori fuori dallo schermo
+              
               visiblePlayers++;
               
-              // Disegna il nome con sfondo per maggiore visibilità
-              const nameX = player.snake[0].x + gridSize/2;
-              const nameY = player.snake[0].y - 8;
+              // LOD (Level of Detail) basato sulla distanza
+              const playerHead = playerState.snake[0];
+              const dist = Math.sqrt(
+                Math.pow(head.x - playerHead.x, 2) + 
+                Math.pow(head.y - playerHead.y, 2)
+              );
               
-              // Ottimizza il rendering del testo
-              if (nameX > 0 && nameX < canvas.width && nameY > 0 && nameY < canvas.height) {
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                ctx.fillRect(player.snake[0].x - 40, player.snake[0].y - 20, 80, 16);
+              // Semplifica il rendering per serpenti lontani
+              const isDistant = dist > 300;
+              const segmentsToRender = isDistant ? 
+                Math.min(3, player.snake.length) : // Solo testa e 2 segmenti
+                player.snake.length; // Tutto il serpente
+              
+              // Disegna il nome solo se non è troppo lontano
+              if (!isDistant) {
+                const nameX = head.x + gridSize/2;
+                const nameY = head.y - 8;
                 
-                ctx.fillStyle = 'white';
-                ctx.font = '12px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(player.name || 'Giocatore', nameX, nameY);
+                otherPlayersCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                otherPlayersCtx.fillRect(head.x - 40, head.y - 20, 80, 16);
+                
+                otherPlayersCtx.fillStyle = 'white';
+                otherPlayersCtx.font = '12px Arial';
+                otherPlayersCtx.textAlign = 'center';
+                otherPlayersCtx.fillText(player.name || 'Giocatore', nameX, nameY);
               }
               
-              // Disegna il serpente con stile semplificato
-              player.snake.forEach((segment, i) => {
-                if (!segment) return;
+              // Disegna il serpente con dettaglio variabile
+              const simplifiedRendering = isMobile || isDistant;
+              
+              for (let i = 0; i < segmentsToRender; i++) {
+                const segment = player.snake[i];
+                if (!segment) continue;
                 
-                // Verifica se il segmento è visibile prima di renderizzarlo
-                if (segment.x < -gridSize || segment.x > canvas.width + gridSize || 
-                    segment.y < -gridSize || segment.y > canvas.height + gridSize) {
-                  return; // Salta segmenti fuori dallo schermo
+                // Salta segmenti non visibili
+                if (segment.x < viewportRect.x || segment.x > viewportRect.x + viewportRect.width || 
+                    segment.y < viewportRect.y || segment.y > viewportRect.y + viewportRect.height) {
+                  continue;
                 }
                 
-                // Disegna solo il bordo per la testa
-                if (i === 0) {
-                  ctx.lineWidth = 2;
-                  ctx.strokeStyle = 'white';
-                  ctx.beginPath();
-                  ctx.arc(
+                // Disegna il bordo solo per la testa e su desktop
+                if (i === 0 && !simplifiedRendering) {
+                  otherPlayersCtx.lineWidth = 2;
+                  otherPlayersCtx.strokeStyle = 'white';
+                  otherPlayersCtx.beginPath();
+                  otherPlayersCtx.arc(
                     segment.x + gridSize/2,
                     segment.y + gridSize/2,
                     gridSize/2 + 1,
                     0,
                     Math.PI * 2
                   );
-                  ctx.stroke();
+                  otherPlayersCtx.stroke();
                 }
                 
                 // Disegna il corpo
-                ctx.fillStyle = player.color || '#00ff00';
-                ctx.beginPath();
-                ctx.arc(
+                otherPlayersCtx.fillStyle = player.color || '#00ff00';
+                otherPlayersCtx.beginPath();
+                otherPlayersCtx.arc(
                   segment.x + gridSize/2,
                   segment.y + gridSize/2,
                   i === 0 ? gridSize/2 : gridSize/2 - 2,
                   0,
                   Math.PI * 2
                 );
-                ctx.fill();
-              });
+                otherPlayersCtx.fill();
+              }
             }
           });
+          
+          // Salva il conteggio giocatori visibili
+          bufferCtx.playerCount = visiblePlayers;
+          lastOtherPlayersRenderTime = timestamp;
         }
         
-        // Disegna il proprio serpente - priorità massima
+        // Disegna altri giocatori dal buffer
+        bufferCtx.drawImage(otherPlayersCanvasRef.current, 0, 0);
+        
+        // 4. Disegna il proprio serpente (priorità massima)
         if (playerState && playerState.snake && playerState.snake.length > 0) {
-          // Disegna il nome
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-          ctx.fillRect(playerState.snake[0].x - 40, playerState.snake[0].y - 20, 80, 16);
+          // Disegna il nome del giocatore
+          bufferCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          bufferCtx.fillRect(playerState.snake[0].x - 40, playerState.snake[0].y - 20, 80, 16);
           
-          ctx.fillStyle = 'white';
-          ctx.font = '12px Arial';
-          ctx.textAlign = 'center';
-          ctx.fillText(playerName || 'Tu', playerState.snake[0].x + gridSize/2, playerState.snake[0].y - 8);
+          bufferCtx.fillStyle = 'white';
+          bufferCtx.font = '12px Arial';
+          bufferCtx.textAlign = 'center';
+          bufferCtx.fillText(playerName || 'Tu', playerState.snake[0].x + gridSize/2, playerState.snake[0].y - 8);
           
-          // Disegna il serpente con colore più luminoso per renderlo più visibile
+          // Effetti speciali per desktop, stile semplificato per mobile
+          const useSimpleStyle = isMobile;
+          
+          // Disegna il serpente
           playerState.snake.forEach((segment, i) => {
             if (!segment) return;
             
-            // Disegna un cerchio più grande per rendere più visibile il serpente
-            // Bordo bianco solo per la testa
+            // Disegna un cerchio più grande per rendere più visibile la testa
             if (i === 0) {
-              ctx.fillStyle = 'white';
-              ctx.beginPath();
-              ctx.arc(
+              bufferCtx.fillStyle = 'white';
+              bufferCtx.beginPath();
+              bufferCtx.arc(
                 segment.x + gridSize/2,
                 segment.y + gridSize/2,
                 gridSize/2 + 2,
                 0,
                 Math.PI * 2
               );
-              ctx.fill();
+              bufferCtx.fill();
               
-              // Effetto luminoso per la testa
-              ctx.shadowColor = playerColor;
-              ctx.shadowBlur = 5; // Ridotto per performance
+              // Effetto luminoso per la testa (solo desktop)
+              if (!useSimpleStyle) {
+                bufferCtx.shadowColor = playerColor;
+                bufferCtx.shadowBlur = 5;
+              }
             }
             
             // Cerchio interno colorato
-            ctx.fillStyle = playerColor;
-            ctx.beginPath();
-            ctx.arc(
+            bufferCtx.fillStyle = playerColor;
+            bufferCtx.beginPath();
+            bufferCtx.arc(
               segment.x + gridSize/2,
               segment.y + gridSize/2,
               i === 0 ? gridSize/2 : gridSize/2 - 2,
               0,
               Math.PI * 2
             );
-            ctx.fill();
+            bufferCtx.fill();
             
             // Resetta l'effetto shadow
-            ctx.shadowBlur = 0;
+            if (!useSimpleStyle) {
+              bufferCtx.shadowBlur = 0;
+            }
           });
         }
         
-        // Disegna stats
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 16px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText(`Punteggio: ${score}`, 10, 25);
+        // 5. Disegna stats (UI overlay)
+        bufferCtx.fillStyle = 'white';
+        bufferCtx.font = 'bold 16px Arial';
+        bufferCtx.textAlign = 'left';
+        bufferCtx.fillText(`Punteggio: ${score}`, 10, 25);
         
-        ctx.textAlign = 'right';
-        ctx.fillText(`Giocatori: ${visiblePlayers + 1}`, canvas.width - 10, 25);
+        bufferCtx.textAlign = 'right';
+        const visiblePlayers = bufferCtx.playerCount || 0;
+        bufferCtx.fillText(`Giocatori: ${visiblePlayers + 1}`, canvas.width - 10, 25);
+        
+        // FPS counter (solo in sviluppo)
+        if (process.env.NODE_ENV !== 'production') {
+          if (frameCount % 30 === 0) {
+            bufferCtx.fps = Math.round(1000 / elapsed);
+          }
+          
+          if (bufferCtx.fps) {
+            bufferCtx.fillStyle = bufferCtx.fps > 45 ? '#00ff00' : (bufferCtx.fps > 30 ? 'yellow' : 'red');
+            bufferCtx.font = '12px monospace';
+            bufferCtx.textAlign = 'left';
+            bufferCtx.fillText(`FPS: ${bufferCtx.fps}`, 10, 45);
+          }
+        }
+        
+        // 6. Copia il buffer nel canvas visibile (operazione più veloce)
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bufferCanvasRef.current, 0, 0);
       };
       
       // Avvia il loop di rendering
