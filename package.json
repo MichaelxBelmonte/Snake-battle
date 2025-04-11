@@ -10,6 +10,7 @@
   "dependencies": {
     "next": "latest",
     "pusher": "^5.2.0",
-    "pusher-js": "^8.4.0-rc2"
+    "pusher-js": "^8.4.0-rc2",
+    "uuid": "^11.1.0"
   }
-} 
+}
