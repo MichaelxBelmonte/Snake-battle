@@ -77,6 +77,7 @@ export default function Home() {
     if (!gameStarted || !playerId || !playerState) return;
 
     console.log('Avvio loop di gioco con setInterval');
+    console.log('Stato iniziale snake:', playerState.snake);
     
     // Piccolo ritardo prima di avviare i loop per garantire che lo stato sia aggiornato
     const startGameLoops = () => {
@@ -87,6 +88,14 @@ export default function Home() {
         
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
+        
+        // Verifica che playerState.snake sia disponibile
+        if (!playerState || !playerState.snake || playerState.snake.length === 0) {
+          console.error("RenderLoop: playerState.snake non disponibile", playerState);
+          return;
+        }
+        
+        console.log("RenderLoop: Disegno snake at", playerState.snake[0]);
         
         // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -172,21 +181,47 @@ export default function Home() {
           ctx.textAlign = 'center';
           ctx.fillText(playerName || 'Tu', playerState.snake[0].x + gridSize/2, playerState.snake[0].y - 5);
           
-          // Disegna il serpente
+          // Disegna il serpente con colore più luminoso per renderlo più visibile
           playerState.snake.forEach((segment, i) => {
             if (!segment) return;
             
-            ctx.fillStyle = playerColor;
+            // Disegna un cerchio più grande per rendere più visibile il serpente
+            // Bordo bianco
+            ctx.fillStyle = 'white';
             ctx.beginPath();
             ctx.arc(
               segment.x + gridSize/2,
               segment.y + gridSize/2,
-              i === 0 ? gridSize/2 : gridSize/2 - 2, // Testa più grande
+              i === 0 ? gridSize/2 + 2 : gridSize/2,
               0,
               Math.PI * 2
             );
             ctx.fill();
+            
+            // Cerchio interno colorato
+            ctx.fillStyle = playerColor;
+            
+            // Per la testa, usa un effetto speciale
+            if (i === 0) {
+              ctx.shadowColor = playerColor;
+              ctx.shadowBlur = 10;
+            }
+            
+            ctx.beginPath();
+            ctx.arc(
+              segment.x + gridSize/2,
+              segment.y + gridSize/2,
+              i === 0 ? gridSize/2 : gridSize/2 - 2,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Resetta l'effetto shadow
+            ctx.shadowBlur = 0;
           });
+        } else {
+          console.error("RenderLoop: Impossibile disegnare il serpente, dati non validi", playerState);
         }
         
         // Disegna stats
@@ -201,7 +236,12 @@ export default function Home() {
       
       // Loop di movimento locale
       const moveInterval = setInterval(() => {
-        if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
+        if (!playerState || !playerState.snake || playerState.snake.length === 0) {
+          console.log("Movimento saltato, playerState non valido:", playerState);
+          return;
+        }
+        
+        console.log("Movimento eseguito, playerState:", playerState);
         
         const gridSize = 20;
         const head = { ...playerState.snake[0] };
@@ -228,11 +268,22 @@ export default function Home() {
             break;
         }
         
+        // Debug: mostra il contenuto stato prima dell'aggiornamento
+        console.log("Testa originale:", playerState.snake[0], "Nuova testa:", head);
+        
         // Aggiorna la posizione localmente
-        setPlayerState(prev => ({
-          ...prev,
-          snake: [head, ...prev.snake.slice(0, -1)]
-        }));
+        setPlayerState(prev => {
+          if (!prev || !prev.snake || prev.snake.length === 0) {
+            console.error("Stato precedente non valido:", prev);
+            return prev;
+          }
+          const newState = {
+            ...prev,
+            snake: [head, ...prev.snake.slice(0, -1)]
+          };
+          console.log("Nuovo stato:", newState);
+          return newState;
+        });
         
         lastDirectionRef.current = directionRef.current;
       }, 1000 / 6); // 6 FPS (più lento)
@@ -344,6 +395,8 @@ export default function Home() {
     if (!playerState || !gameStarted || !playerId) return;
     
     try {
+      console.log("Invio aggiornamento al server, snake position:", playerState.snake[0]);
+      
       const response = await fetch(`${API_BASE_URL}/api/move`, {
         method: 'POST',
         headers: {
@@ -366,6 +419,7 @@ export default function Home() {
       }
       
       const data = await response.json();
+      console.log("Risposta dal server:", data);
       
       // Aggiorna il tuo stato
       setPlayerState(data.player);
@@ -585,8 +639,46 @@ export default function Home() {
       
       const data = await res.json();
       console.log('Dati ricevuti dal server:', data);
+      console.log('Player:', data.player);
+      console.log('Snake:', data.player.snake);
+      console.log('Food items:', data.foodItems);
       
-      // Imposta i dati iniziali prima di manipolare il canvas
+      if (!data.player || !data.player.snake || !data.player.snake.length) {
+        throw new Error('Dati del serpente mancanti o non validi');
+      }
+      
+      // Prepara il canvas prima di impostare i dati
+      if (canvasRef.current) {
+        const canvas = canvasRef.current;
+        canvas.width = 800;
+        canvas.height = 600;
+        
+        // Pre-rendering del primo frame per evitare sfarfallio
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#121212';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Disegna griglia
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.lineWidth = 0.5;
+        const gridSize = 20;
+        
+        for (let x = 0; x <= canvas.width; x += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvas.height);
+          ctx.stroke();
+        }
+        
+        for (let y = 0; y <= canvas.height; y += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
+          ctx.stroke();
+        }
+      }
+      
+      // Imposta i dati iniziali dopo aver preparato il canvas
       setPlayerId(data.player.id);
       setPlayerState(data.player);
       setFoodItems(data.foodItems || []);
@@ -598,37 +690,94 @@ export default function Home() {
         // Prepara il canvas dopo aver impostato i dati ma prima di mostrare l'interfaccia
         if (canvasRef.current) {
           const canvas = canvasRef.current;
-          canvas.width = 800;
-          canvas.height = 600;
-          
-          // Pre-rendering del primo frame per evitare sfarfallio
           const ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#121212';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
           
-          // Disegna griglia
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-          ctx.lineWidth = 0.5;
+          // Disegno debug del serpente iniziale per verifica
           const gridSize = 20;
           
-          for (let x = 0; x <= canvas.width; x += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvas.height);
-            ctx.stroke();
+          // Disegna il serpente con colore luminoso e bordo bianco per renderlo più visibile
+          if (data.player && data.player.snake) {
+            data.player.snake.forEach((segment, i) => {
+              if (!segment) return;
+              
+              // Disegna un cerchio più grande per rendere più visibile il serpente
+              // Bordo bianco
+              ctx.fillStyle = 'white';
+              ctx.beginPath();
+              ctx.arc(
+                segment.x + gridSize/2,
+                segment.y + gridSize/2,
+                i === 0 ? gridSize/2 + 2 : gridSize/2,
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+              
+              // Cerchio interno colorato
+              ctx.fillStyle = playerColor;
+              ctx.beginPath();
+              ctx.arc(
+                segment.x + gridSize/2,
+                segment.y + gridSize/2,
+                i === 0 ? gridSize/2 : gridSize/2 - 2,
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+              
+              // Punto di debug per la testa
+              if (i === 0) {
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(
+                  segment.x + gridSize/2,
+                  segment.y + gridSize/2,
+                  3,
+                  0,
+                  Math.PI * 2
+                );
+                ctx.fill();
+              }
+            });
           }
           
-          for (let y = 0; y <= canvas.height; y += gridSize) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
-            ctx.stroke();
+          // Disegna il cibo
+          if (data.foodItems && data.foodItems.length > 0) {
+            data.foodItems.forEach(food => {
+              if (!food) return;
+              
+              ctx.fillStyle = '#e73c3e';
+              ctx.beginPath();
+              ctx.arc(
+                food.x + gridSize/2,
+                food.y + gridSize/2,
+                gridSize/2 - 2,
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+            });
           }
+          
+          // Disegna stats iniziali
+          ctx.fillStyle = 'white';
+          ctx.font = 'bold 16px Arial';
+          ctx.textAlign = 'left';
+          ctx.fillText(`Punteggio: ${data.player.score || 0}`, 10, 25);
+          
+          ctx.textAlign = 'right';
+          ctx.fillText(`Giocatori: ${(data.otherPlayers?.length || 0) + 1}`, canvas.width - 10, 25);
         }
+        
+        // Impostiamo anche la direzione iniziale
+        directionRef.current = 'right';
+        lastDirectionRef.current = 'right';
         
         setError('');
         setGameStarted(true);
-      }, 300); // Aumento il ritardo per garantire che il canvas sia pronto
+        
+        console.log('Interfaccia di gioco attivata!');
+      }, 500); // Aumento ulteriormente il ritardo per garantire che il canvas sia pronto
       
       console.log('Gioco avviato con successo, ID:', data.player.id);
     } catch (err) {
@@ -697,10 +846,6 @@ export default function Home() {
           )}
           
           <div className="game-info">
-            <div className="stats">
-              <div className="score">Punteggio: <span>{score}</span></div>
-              <div className="player-count">Giocatori online: <span>{otherPlayers.length + 1}</span></div>
-            </div>
             <div className="controls">
               {isMobile ? (
                 <p>Usa il joystick per muovere il serpente</p>
@@ -920,23 +1065,6 @@ export default function Home() {
           flex-direction: column;
           gap: 1rem;
           width: 100%;
-        }
-        
-        .stats {
-          display: flex;
-          justify-content: space-between;
-          font-size: 1.1rem;
-        }
-        
-        .score, .player-count {
-          padding: 0.5rem 1rem;
-          background-color: rgba(255, 255, 255, 0.05);
-          border-radius: 5px;
-        }
-        
-        .score span, .player-count span {
-          font-weight: 600;
-          color: var(--primary-color);
         }
         
         .controls {
