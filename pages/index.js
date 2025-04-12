@@ -166,8 +166,16 @@ export default function Home() {
 
     console.log('Avvio loop di gioco con setInterval');
     
+    // Riferimenti alle variabili locali che verranno chiuse nel cleanup
+    let gameLoopActive = true;
+    let moveIntervalId = null;
+    let serverIntervalId = null;
+    let animFrameId = null;
+    
     // Piccolo ritardo prima di avviare i loop per garantire che lo stato sia aggiornato
     const startGameLoops = () => {
+      if (!gameLoopActive) return; // Evita avvio se già in pulizia
+      
       // Pre-rendering degli elementi statici
       preRenderStaticElements();
       
@@ -300,7 +308,7 @@ export default function Home() {
       };
       
       const renderLoop = (timestamp) => {
-        if (!canvasRef.current) return;
+        if (!canvasRef.current || !gameLoopActive) return;
         
         // Calcola FPS e il tempo tra i frame
         const deltaTime = lastFrameTimeRef.current ? timestamp - lastFrameTimeRef.current : 0;
@@ -309,7 +317,7 @@ export default function Home() {
         // Controlla se è necessario limitare il framerate
         if (deltaTime < frameInterval) {
           // Se il tempo trascorso è troppo breve, salta questo frame
-          animationIdRef.current = requestAnimationFrame(renderLoop);
+          animFrameId = requestAnimationFrame(renderLoop);
           return;
         }
         
@@ -387,15 +395,15 @@ export default function Home() {
         lastFrameTimeRef.current = timestamp;
         
         // Continua il loop di animazione
-        animationIdRef.current = requestAnimationFrame(renderLoop);
+        animFrameId = requestAnimationFrame(renderLoop);
       };
       
       // Avvia il loop di rendering
-      frameId = requestAnimationFrame(renderLoop);
+      animFrameId = requestAnimationFrame(renderLoop);
       
       // Loop di movimento locale - movimento più fluido con frequenza moderata
-      const moveInterval = setInterval(() => {
-        if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
+      moveIntervalId = setInterval(() => {
+        if (!playerState || !playerState.snake || playerState.snake.length === 0 || !gameLoopActive) return;
         
         const gridSize = gridSizeRef.current;
         const head = { ...playerState.snake[0] };
@@ -438,16 +446,15 @@ export default function Home() {
       
       // Comunicazione col server - frequenza adeguata ai requisiti
       // Intervallo più adatto al multiplayer che bilanciando latenza e performance
-      const serverInterval = setInterval(() => {
-        updateWithServer();
+      serverIntervalId = setInterval(() => {
+        if (gameLoopActive) {
+          updateWithServer();
+        }
       }, 200); // 5 volte al secondo (200ms) - bilanciamento tra reattività e carico
       
       // Memorizza gli intervalli per la pulizia
-      renderLoopRef.current = frameId;
-      apiLoopRef.current = serverInterval;
-      
-      // Aggiungi una referenza per moveInterval
-      window.moveInterval = moveInterval;
+      renderLoopRef.current = animFrameId;
+      apiLoopRef.current = serverIntervalId;
     };
     
     // Avvia i loop con un piccolo ritardo per evitare sfarfallio
@@ -455,10 +462,25 @@ export default function Home() {
     
     // Pulizia
     return () => {
+      console.log('Pulizia game loop...');
+      gameLoopActive = false; // Imposta flag di pulizia
+      
       clearTimeout(timeoutId);
-      if (renderLoopRef.current) cancelAnimationFrame(renderLoopRef.current);
-      if (apiLoopRef.current) clearInterval(apiLoopRef.current);
-      if (window.moveInterval) clearInterval(window.moveInterval);
+      
+      // Pulisci tutti gli interval e timeout
+      if (moveIntervalId) clearInterval(moveIntervalId);
+      if (serverIntervalId) clearInterval(serverIntervalId);
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      
+      // Pulisci anche i riferimenti globali
+      if (renderLoopRef.current) {
+        cancelAnimationFrame(renderLoopRef.current);
+        renderLoopRef.current = null;
+      }
+      if (apiLoopRef.current) {
+        clearInterval(apiLoopRef.current);
+        apiLoopRef.current = null;
+      }
     };
   }, [gameStarted, playerId, playerState]);
   
@@ -552,6 +574,14 @@ export default function Home() {
   useEffect(() => {
     if (!gameStarted || !playerId) return;
     
+    console.log("Inizializzazione Pusher con ID:", playerId);
+    
+    // Preveniamo reinizializzazioni inutili
+    if (pusherRef.current) {
+      console.log("Pusher già inizializzato, salto reinizializzazione");
+      return;
+    }
+    
     let pusherInstance = null;
     let channelInstance = null;
     let isCleaningUp = false;
@@ -575,13 +605,10 @@ export default function Home() {
           disableStats: true, // Disabilita statistiche per ridurre traffico
           pongTimeout: 10000, // Aumenta timeout
           activityTimeout: 30000, // Aumenta timeout attività
-          authEndpoint: `${API_BASE_URL}/api/pusher/auth`,
-          auth: {
-            headers: {
-              'X-Player-ID': playerId
-            }
-          },
         });
+        
+        // Memorizza il riferimento a Pusher subito per evitare doppia inizializzazione
+        pusherRef.current = pusherInstance;
         
         // Sottoscrivi al canale
         channelInstance = pusherInstance.subscribe('snake-game');
@@ -758,9 +785,6 @@ export default function Home() {
             }
           }
         });
-        
-        // Memorizza il riferimento a Pusher
-        pusherRef.current = pusherInstance;
       } catch (error) {
         console.error('Errore inizializzazione Pusher:', error);
         setError('Errore di connessione: ricarica la pagina');
@@ -802,6 +826,7 @@ export default function Home() {
     
     // Disconnetti al termine
     return () => {
+      console.log('Pulizia componente con gameStarted=' + gameStarted + ' e playerId=' + playerId);
       isCleaningUp = true;
       console.log('Pulizia connessione Pusher...');
       clearInterval(pingInterval);
@@ -825,6 +850,7 @@ export default function Home() {
             pusherInstance.disconnect();
             pusherInstance = null;
             channelInstance = null;
+            // Importante: reimposta il riferimento a null per consentire future reinizializzazioni
             pusherRef.current = null;
           } catch (error) {
             console.error('Errore durante disconnessione Pusher:', error);
@@ -833,7 +859,7 @@ export default function Home() {
         setConnectionStatus('disconnesso');
       }, 300);
     };
-  }, [gameStarted, playerId, lastMessageTime, debugMode]);
+  }, [gameStarted, playerId]); // Rimuoviamo le dipendenze che potrebbero causare reinizializzazioni
   
   // Nuovo effetto per pulire i giocatori inattivi
   useEffect(() => {
@@ -1255,14 +1281,15 @@ export default function Home() {
     if (!debugMode) return;
     
     const now = Date.now();
-    const connectionAge = lastMessageTime ? Math.floor((now - lastMessageTime) / 1000) : 'N/A';
+    const lastMessageTimeVal = lastMessageTime || now;
+    const connectionAge = Math.floor((now - lastMessageTimeVal) / 1000);
     
     bufferCtx.fillStyle = connectionStatus === 'connected' ? '#00ff00' : 
                          (connectionStatus === 'connecting' ? '#ffff00' : '#ff0000');
     bufferCtx.font = '12px monospace';
     bufferCtx.textAlign = 'left';
     bufferCtx.fillText(`Connessione: ${connectionStatus} (${connectionAge}s)`, 10, 65);
-    bufferCtx.fillText(`ID: ${playerId?.substring(0,8)}`, 10, 80);
+    bufferCtx.fillText(`ID: ${playerId?.substring(0,8) || 'N/A'}`, 10, 80);
     bufferCtx.fillText(`Altri: ${otherPlayers?.length || 0} (visibili: ${visiblePlayers})`, 10, 95);
     
     // Visualizza le coordinate di alcuni giocatori per debug
