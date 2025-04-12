@@ -4,7 +4,7 @@ import Pusher from 'pusher-js';
 // URL dell'API da utilizzare in produzione o in sviluppo
 const API_BASE_URL = process.env.NODE_ENV === 'production' 
   ? 'https://snake-battle.vercel.app' 
-  : '';
+  : '';  // In sviluppo, usa URL relativo
 
 // Funzioni di utilità per i colori
 const darkenColor = (hex, percent) => {
@@ -208,35 +208,86 @@ export default function Home() {
           const player = players[pid];
           
           // Salta se il giocatore non ha un serpente o direzione
-          if (!player || !player.snake || !player.direction) return;
+          if (!player || !player.snake || !player.direction || player.snake.length === 0) return;
           
           // Inizializza se non esiste già
           if (!newInterpolated[pid]) {
             newInterpolated[pid] = {...player};
           } else {
-            // Calcola la nuova posizione della testa in base alla direzione e velocità
-            const head = [...player.snake[0]];
-            const speed = player.speed || 5; // Pixels per second
-            const distanceToMove = speed * deltaTime;
+            // Ottieni la posizione attuale della testa
+            const currentHead = player.snake[0];
+            const interpolatedHead = newInterpolated[pid].snake[0];
+            
+            // Velocità di movimento basata sulla griglia e aggiustata per fluidità
+            const gridSize = gridSizeRef.current;
+            const speed = 5 * gridSize * deltaTime; // Velocità adattiva basata su deltaTime
             
             // Calcola la nuova posizione in base alla direzione
+            let newX = interpolatedHead.x;
+            let newY = interpolatedHead.y;
+            
+            // Interpolazione con smoothing
+            const smoothFactor = 0.15; // Fattore di smoothing per movimenti più naturali
+            
             switch (player.direction) {
               case 'up':
-                head[1] -= distanceToMove;
+                // Interpola con smoothing verso l'alto
+                newY = interpolatedHead.y - speed;
+                // Limita l'interpolazione alla posizione reale per evitare "sovrainterpolazione"
+                if (Math.abs(newY - currentHead.y) > gridSize) {
+                  newY = currentHead.y;
+                }
                 break;
               case 'down':
-                head[1] += distanceToMove;
+                // Interpola con smoothing verso il basso
+                newY = interpolatedHead.y + speed;
+                // Limita l'interpolazione alla posizione reale
+                if (Math.abs(newY - currentHead.y) > gridSize) {
+                  newY = currentHead.y;
+                }
                 break;
               case 'left':
-                head[0] -= distanceToMove;
+                // Interpola con smoothing verso sinistra
+                newX = interpolatedHead.x - speed;
+                // Limita l'interpolazione alla posizione reale
+                if (Math.abs(newX - currentHead.x) > gridSize) {
+                  newX = currentHead.x;
+                }
                 break;
               case 'right':
-                head[0] += distanceToMove;
+                // Interpola con smoothing verso destra
+                newX = interpolatedHead.x + speed;
+                // Limita l'interpolazione alla posizione reale
+                if (Math.abs(newX - currentHead.x) > gridSize) {
+                  newX = currentHead.x;
+                }
                 break;
             }
             
-            // Aggiorna la posizione interpolata
-            const newSnake = [head, ...player.snake.slice(0, -1)];
+            // Se la posizione reale è cambiata drasticamente (teleport/wrap around), usa quella invece di interpolare
+            const distanceX = Math.abs(currentHead.x - interpolatedHead.x);
+            const distanceY = Math.abs(currentHead.y - interpolatedHead.y);
+            if (distanceX > gridSize * 3 || distanceY > gridSize * 3) {
+              newX = currentHead.x;
+              newY = currentHead.y;
+            }
+            
+            // Aggiorna la posizione della testa interpolata
+            const newSnake = [{
+              x: newX,
+              y: newY
+            }];
+            
+            // Aggiorna tutte le altre posizioni del serpente
+            for (let i = 0; i < player.snake.length - 1; i++) {
+              // Il corpo segue la testa in modo fluido
+              newSnake.push({
+                x: newInterpolated[pid].snake[i].x,
+                y: newInterpolated[pid].snake[i].y
+              });
+            }
+            
+            // Aggiorna lo stato interpolato del giocatore
             newInterpolated[pid] = {
               ...player,
               snake: newSnake
@@ -254,6 +305,13 @@ export default function Home() {
         // Calcola FPS e il tempo tra i frame
         const deltaTime = lastFrameTimeRef.current ? timestamp - lastFrameTimeRef.current : 0;
         frameCountRef.current++;
+        
+        // Controlla se è necessario limitare il framerate
+        if (deltaTime < frameInterval) {
+          // Se il tempo trascorso è troppo breve, salta questo frame
+          animationIdRef.current = requestAnimationFrame(renderLoop);
+          return;
+        }
         
         // Aggiorna FPS ogni secondo
         if (timestamp - fpsLastUpdateRef.current >= 1000) {
@@ -346,19 +404,19 @@ export default function Home() {
         
         // Movimento locale basato sulla direzione
         switch (directionRef.current) {
-          case 'UP':
+          case 'up':
             head.y -= gridSize;
             if (head.y < 0) head.y = canvasHeight - gridSize;
             break;
-          case 'DOWN':
+          case 'down':
             head.y += gridSize;
             if (head.y >= canvasHeight) head.y = 0;
             break;
-          case 'LEFT':
+          case 'left':
             head.x -= gridSize;
             if (head.x < 0) head.x = canvasWidth - gridSize;
             break;
-          case 'RIGHT':
+          case 'right':
             head.x += gridSize;
             if (head.x >= canvasWidth) head.x = 0;
             break;
@@ -462,7 +520,23 @@ export default function Home() {
         // Filtro stretto e verifica esplicita che non ci siamo noi stessi
         const myId = playerId; // Esplicito per evitare problemi di closure
         const filteredPlayers = data.otherPlayers.filter(p => p && p.id && p.id !== myId);
-        setOtherPlayers(filteredPlayers);
+        
+        // Aggiorna timestamp per ogni giocatore
+        const timestampedPlayers = filteredPlayers.map(player => ({
+          ...player,
+          lastUpdate: Date.now(),
+          // Imposta direzione per il movimento
+          direction: player.direction || 'right'
+        }));
+        
+        setOtherPlayers(timestampedPlayers);
+        
+        // IMPORTANTE: Aggiorna anche il sistema di players per l'interpolazione
+        const updatedPlayers = {};
+        timestampedPlayers.forEach(player => {
+          updatedPlayers[player.id] = player;
+        });
+        setPlayers(updatedPlayers);
         
         // Debug log, solo occasionalmente
         if (debugMode && Math.random() < 0.05) {
@@ -481,14 +555,18 @@ export default function Home() {
     let pusherInstance = null;
     let channelInstance = null;
     let isCleaningUp = false;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
     
     const initializePusher = () => {
       try {
-        // Resetta lo stato degli other players
-        setOtherPlayers([]);
+        // Resetta lo stato degli other players se è una nuova connessione, non una riconnessione
+        if (reconnectAttempts === 0) {
+          setOtherPlayers([]);
+        }
         setConnectionStatus('connessione...');
         
-        console.log('Inizializzazione nuova connessione Pusher');
+        console.log('Inizializzazione connessione Pusher (tentativo ' + (reconnectAttempts + 1) + ')');
         
         // Inizializza Pusher con opzioni ottimizzate
         pusherInstance = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
@@ -515,17 +593,46 @@ export default function Home() {
           console.log('Stato connessione Pusher:', states.current);
           setConnectionStatus(states.current);
           
-          // Se la connessione è stata stabilita, aggiorna il timestamp
+          // Se la connessione è stata stabilita, aggiorna il timestamp e resetta i tentativi
           if (states.current === 'connected') {
             setLastMessageTime(Date.now());
+            lastSocketMessageTimeRef.current = Date.now();
+            reconnectAttempts = 0; // Reset dei tentativi quando connesso con successo
+            
+            // Forza un aggiornamento immediato per recuperare lo stato attuale
+            updateWithServer();
           } else if (states.current === 'disconnected' || states.current === 'failed') {
-            // Tentativo di riconnessione dopo un breve ritardo
-            console.log('Tentativo di riconnessione tra 3 secondi...');
-            setTimeout(() => {
-              if (!isCleaningUp && pusherInstance) {
-                pusherInstance.connect();
-              }
-            }, 3000);
+            // Tentativo di riconnessione dopo un breve ritardo, con backoff esponenziale
+            const reconnectDelay = Math.min(3000 * Math.pow(1.5, reconnectAttempts), 15000);
+            
+            console.log(`Tentativo di riconnessione ${reconnectAttempts + 1}/${maxReconnectAttempts} tra ${reconnectDelay/1000}s...`);
+            
+            if (reconnectAttempts < maxReconnectAttempts) {
+              setTimeout(() => {
+                if (!isCleaningUp) {
+                  reconnectAttempts++;
+                  
+                  // Disconnetti completamente prima di riconnetterti
+                  if (pusherInstance) {
+                    try {
+                      if (channelInstance) {
+                        pusherInstance.unsubscribe('snake-game');
+                      }
+                      pusherInstance.disconnect();
+                    } catch (error) {
+                      console.error('Errore durante reset connessione:', error);
+                    }
+                  }
+                  
+                  // Inizializza una nuova connessione
+                  initializePusher();
+                }
+              }, reconnectDelay);
+            } else {
+              console.error('Numero massimo di tentativi di riconnessione raggiunto');
+              setConnectionStatus('errore');
+              setError('Impossibile connettersi al server dopo multipli tentativi. Ricarica la pagina.');
+            }
           }
         });
         
@@ -540,6 +647,7 @@ export default function Home() {
         channelInstance.bind('player-joined', (data) => {
           if (isCleaningUp || !data) return;
           setLastMessageTime(Date.now());
+          lastSocketMessageTimeRef.current = Date.now();
           
           console.log('Ricevuto evento player-joined:', 
             data.player ? data.player.id : 'nessun player',
@@ -563,7 +671,39 @@ export default function Home() {
               direction: player.direction || 'right'
             }));
             
+            // Aggiorna entrambi gli stati per garantire coerenza
             setOtherPlayers(timestampedPlayers);
+            
+            // IMPORTANTE: Aggiorna anche il sistema di players per l'interpolazione
+            const updatedPlayers = {};
+            timestampedPlayers.forEach(player => {
+              updatedPlayers[player.id] = player;
+            });
+            setPlayers(updatedPlayers);
+          }
+          
+          // Aggiorna anche quando un singolo giocatore si unisce
+          if (data.player && data.player.id !== playerId) {
+            console.log('Nuovo giocatore unito:', data.player.id, data.player.name);
+            setOtherPlayers(prev => {
+              const newPlayer = {
+                ...data.player,
+                lastUpdate: Date.now(),
+                direction: data.player.direction || 'right'
+              };
+              return [...prev.filter(p => p.id !== data.player.id), newPlayer];
+            });
+            
+            // Aggiorna anche il sistema di players
+            setPlayers(prev => {
+              const newPlayers = {...prev};
+              newPlayers[data.player.id] = {
+                ...data.player,
+                lastUpdate: Date.now(),
+                direction: data.player.direction || 'right'
+              };
+              return newPlayers;
+            });
           }
         });
         
@@ -571,6 +711,7 @@ export default function Home() {
         channelInstance.bind('player-moved', (data) => {
           if (isCleaningUp || !data) return;
           setLastMessageTime(Date.now());
+          lastSocketMessageTimeRef.current = Date.now();
           
           // Log meno frequente per non intasare la console
           if (debugMode && Math.random() < 0.1) {
@@ -597,6 +738,16 @@ export default function Home() {
               direction: player.direction || 'right'
             }));
             
+            // Aggiorna entrambi gli stati per garantire coerenza
+            setOtherPlayers(timestampedPlayers);
+            
+            // IMPORTANTE: Aggiorna anche il sistema di players per l'interpolazione
+            const updatedPlayers = {};
+            timestampedPlayers.forEach(player => {
+              updatedPlayers[player.id] = player;
+            });
+            setPlayers(updatedPlayers);
+            
             // Solo in debug mode
             if (debugMode && Math.random() < 0.05) {
               console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
@@ -605,8 +756,6 @@ export default function Home() {
                   `${filtered[0].snake.length} segmenti` : 'nessun serpente');
               }
             }
-            
-            setOtherPlayers(timestampedPlayers);
           }
         });
         
@@ -1137,25 +1286,49 @@ export default function Home() {
     
     // Area attorno al serpente locale
     if (snakeRef.current && snakeRef.current.length > 0) {
+      // Consideriamo solo testa e coda per ridurre le aree da aggiornare
       const head = snakeRef.current[0];
+      const tail = snakeRef.current[snakeRef.current.length - 1];
+      
+      // Area per la testa
       areas.push({
         x: head.x - margin,
         y: head.y - margin,
-        width: gridSizeRef.current * 2 + margin * 2,
-        height: gridSizeRef.current * 2 + margin * 2
+        width: gridSizeRef.current + margin * 2,
+        height: gridSizeRef.current + margin * 2
+      });
+      
+      // Area per la coda
+      areas.push({
+        x: tail.x - margin,
+        y: tail.y - margin,
+        width: gridSizeRef.current + margin * 2,
+        height: gridSizeRef.current + margin * 2
       });
     }
     
-    // Aree attorno ai serpenti remoti
+    // Aree attorno ai serpenti remoti - con priorità basata sulla distanza
     Object.values(interpolatedPlayers).forEach(player => {
       if (!player.snake || player.snake.length === 0) return;
       
+      // Consideriamo solo testa e coda per ridurre le aree da aggiornare
       const head = player.snake[0];
+      const tail = player.snake[player.snake.length - 1];
+      
+      // Area per la testa
       areas.push({
         x: head.x - margin,
         y: head.y - margin,
-        width: gridSizeRef.current * 2 + margin * 2,
-        height: gridSizeRef.current * 2 + margin * 2
+        width: gridSizeRef.current + margin * 2,
+        height: gridSizeRef.current + margin * 2
+      });
+      
+      // Area per la coda
+      areas.push({
+        x: tail.x - margin,
+        y: tail.y - margin,
+        width: gridSizeRef.current + margin * 2,
+        height: gridSizeRef.current + margin * 2
       });
     });
     
@@ -1171,7 +1344,47 @@ export default function Home() {
       });
     }
     
-    return areas;
+    // Ottimizza le aree combinando quelle che si sovrappongono
+    const optimizedAreas = [];
+    areas.forEach(area => {
+      let merged = false;
+      
+      // Verifica se l'area può essere unita con un'area già esistente
+      for (let i = 0; i < optimizedAreas.length; i++) {
+        const existingArea = optimizedAreas[i];
+        
+        // Calcola l'area di intersezione
+        const x1 = Math.max(area.x, existingArea.x);
+        const y1 = Math.max(area.y, existingArea.y);
+        const x2 = Math.min(area.x + area.width, existingArea.x + existingArea.width);
+        const y2 = Math.min(area.y + area.height, existingArea.y + existingArea.height);
+        
+        // Se c'è intersezione, unisci le aree
+        if (x1 < x2 && y1 < y2) {
+          // Calcola le nuove coordinate dell'area unita
+          const newX = Math.min(area.x, existingArea.x);
+          const newY = Math.min(area.y, existingArea.y);
+          const newWidth = Math.max(area.x + area.width, existingArea.x + existingArea.width) - newX;
+          const newHeight = Math.max(area.y + area.height, existingArea.y + existingArea.height) - newY;
+          
+          // Aggiorna l'area esistente
+          existingArea.x = newX;
+          existingArea.y = newY;
+          existingArea.width = newWidth;
+          existingArea.height = newHeight;
+          
+          merged = true;
+          break;
+        }
+      }
+      
+      // Se l'area non è stata unita, aggiungila alla lista
+      if (!merged) {
+        optimizedAreas.push({...area});
+      }
+    });
+    
+    return optimizedAreas;
   };
 
   // Funzione per renderizzare il cibo
