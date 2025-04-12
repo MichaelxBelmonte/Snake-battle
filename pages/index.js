@@ -170,6 +170,28 @@ export default function Home() {
     console.log('Avvio loop di gioco con setInterval');
     gameLoopActiveRef.current = true; // Marca il game loop come avviato
     
+    // DEBUG: Assicuriamoci che il canvas sia visibile e correttamente dimensionato
+    if (canvasRef.current) {
+      console.log('Canvas esiste:', canvasRef.current);
+      console.log('Dimensioni canvas:', canvasRef.current.width, 'x', canvasRef.current.height);
+      
+      // Aggiunge un bordo rosso visibile al canvas per debug
+      canvasRef.current.style.border = '5px solid red';
+      
+      // Riempie il canvas con un colore di sfondo visibile
+      const ctx = canvasRef.current.getContext('2d');
+      ctx.fillStyle = '#004400';
+      ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      
+      // Disegna un testo di debug
+      ctx.fillStyle = 'white';
+      ctx.font = '24px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Canvas di gioco - DEBUG', canvasRef.current.width / 2, canvasRef.current.height / 2);
+    } else {
+      console.error('ERRORE: Canvas non trovato!');
+    }
+    
     // Riferimenti alle variabili locali che verranno chiuse nel cleanup
     let gameLoopActive = true;
     let moveIntervalId = null;
@@ -1602,360 +1624,241 @@ export default function Home() {
             <h2>Come giocare</h2>
             <ul>
               <li>Usa le <strong>frecce direzionali</strong> per muovere il serpente</li>
-              <li>Su <strong>dispositivi mobili</strong>, usa il joystick o fai swipe</li>
-              <li>Raccogli il cibo per crescere e guadagnare punti</li>
-              <li>Evita di scontrarti con gli altri serpenti</li>
-              <li>Diventa il serpente più lungo della partita!</li>
+              <li>Raccogli il <strong>cibo</strong> per crescere e aumentare il punteggio</li>
+              <li>Evita di colpire il tuo serpente o i bordi</li>
+              <li>Competi con altri giocatori in tempo reale!</li>
             </ul>
           </div>
         </div>
       ) : (
-        <div id="game-container">
-          <canvas ref={canvasRef} id="gameCanvas"></canvas>
+        <div id="game-container" className="game-container" style={{ border: '2px dashed yellow', padding: '10px', position: 'relative', minHeight: '600px', backgroundColor: '#222' }}>
+          <div className="game-info">
+            <p>Usa le frecce direzionali ↑ ← ↓ → per muovere il serpente</p>
+            <div className="connection-status">
+              <span className={`status-indicator ${connectionStatus === 'connected' ? 'connected' : 'disconnected'}`}></span>
+              Stato: {connectionStatus}
+            </div>
+          </div>
+          
+          <canvas 
+            ref={canvasRef} 
+            width="800" 
+            height="600" 
+            style={{
+              display: 'block',
+              margin: '0 auto',
+              border: '3px solid #444',
+              borderRadius: '4px',
+              backgroundColor: '#1a1a1a',
+              boxShadow: '0 0 20px rgba(0, 0, 0, 0.5)',
+              position: 'relative',
+              zIndex: 10
+            }}
+          />
           
           {isMobile && (
-            <div className="controls-container">
-              <div className="joystick-container" ref={joystickRef}>
-                <div className="joystick-base">
-                  <div className="joystick-stick"></div>
-                </div>
+            <div className="mobile-controls">
+              <div 
+                ref={joystickRef} 
+                className="joystick"
+                style={{
+                  position: 'fixed',
+                  bottom: '50px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: '150px',
+                  height: '150px',
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                  border: '2px solid rgba(255, 255, 255, 0.3)',
+                  zIndex: 100
+                }}
+              >
+                <div 
+                  className="joystick-stick"
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: '60px',
+                    height: '60px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+                    border: '2px solid rgba(255, 255, 255, 0.7)',
+                  }}
+                ></div>
               </div>
             </div>
           )}
           
-          <div className="game-info">
-            <div className="controls">
-              {isMobile ? (
-                <p>Usa il joystick per muovere il serpente</p>
-              ) : (
-                <p>Usa le frecce direzionali ↑ ↓ ← → per muovere il serpente</p>
-              )}
-            </div>
-            
-            <div className="connection-status">
-              <span className={`status-indicator ${connectionStatus}`}></span>
-              <span>Stato: {connectionStatus}</span>
-              <button 
-                className="debug-button"
-                onClick={() => setDebugMode(!debugMode)}
-              >
-                {debugMode ? 'Disattiva Debug' : 'Attiva Debug'}
-              </button>
-            </div>
-            
-            {error && <p className="error">{error}</p>}
-          </div>
+          <button 
+            className="debug-button"
+            onClick={() => setDebugMode(!debugMode)}
+            style={{
+              position: 'absolute',
+              bottom: '10px',
+              right: '10px',
+              padding: '8px 16px',
+              backgroundColor: debugMode ? '#3498db' : '#2c3e50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              zIndex: 20
+            }}
+          >
+            {debugMode ? 'Disattiva Debug' : 'Attiva Debug'}
+          </button>
         </div>
       )}
       
-      <style jsx global>{`
-        :root {
-          --primary-color: #4a90e2;
-          --card-bg: #1a1a2e;
-          --text-color: #ffffff;
-          --text-secondary: #a0aec0;
-          --border-radius: 10px;
-        }
-        
-        body {
-          margin: 0;
-          padding: 0;
-          font-family: 'Poppins', sans-serif;
-          background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-          color: var(--text-color);
+      <style jsx>{`
+        .container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
           min-height: 100vh;
-          overscroll-behavior: none; /* Previene bounce effect su mobile */
-        }
-        
-        * {
-          box-sizing: border-box;
+          padding: 20px;
+          background-color: #191970;
+          color: white;
+          font-family: Arial, sans-serif;
         }
         
         h1 {
+          margin-bottom: 20px;
           font-size: 2.5rem;
-          margin-bottom: 2rem;
+          background: linear-gradient(45deg, #2196F3, #e91e63);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
           text-align: center;
-          color: var(--text-color);
-          text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-        }
-        
-        input {
-          padding: 0.5rem 1rem;
-          border: 2px solid rgba(255, 255, 255, 0.1);
-          border-radius: var(--border-radius);
-          background-color: rgba(255, 255, 255, 0.05);
-          color: var(--text-color);
-          font-size: 1rem;
-          transition: all 0.3s ease;
-        }
-        
-        input:focus {
-          outline: none;
-          border-color: var(--primary-color);
-          background-color: rgba(255, 255, 255, 0.1);
-        }
-        
-        button {
-          width: 100%;
-          padding: 0.8rem;
-          border: none;
-          border-radius: var(--border-radius);
-          background-color: var(--primary-color);
-          color: white;
-          font-size: 1.1rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-        
-        button:hover {
-          background-color: #357abd;
-          transform: translateY(-1px);
-        }
-        
-        .error {
-          color: #e53e3e;
-          margin-top: 0.5rem;
-          text-align: center;
-        }
-      `}</style>
-      
-      <style jsx>{`
-        .container {
-          max-width: 850px;
-          margin: 0 auto;
-          padding: 2rem;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          overflow-x: hidden; /* Previene scroll orizzontale */
-        }
-        
-        #game-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          width: 100%;
-          background-color: var(--card-bg);
-          border-radius: var(--border-radius);
-          padding: 1.5rem;
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-          margin-top: 2rem;
-          box-sizing: border-box;
-        }
-        
-        canvas {
-          display: block;
-          margin: 0 auto;
-          image-rendering: pixelated;
-          image-rendering: crisp-edges;
-          box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
-          border-radius: 4px;
-          transform: translateZ(0); /* Attiva l'accelerazione hardware */
-          will-change: transform; /* Suggerisce al browser di ottimizzare le trasformazioni */
-        }
-        
-        .controls-container {
-          width: 100%;
-          display: flex;
-          justify-content: center;
-          margin-top: 1rem;
-          background-color: rgba(0, 0, 0, 0.3);
-          border-radius: 15px;
-          padding: 15px;
-          transform: translateZ(0); /* Attiva l'accelerazione hardware */
-          will-change: transform; /* Suggerisce al browser di ottimizzare le trasformazioni */
-        }
-        
-        .joystick-container {
-          position: relative;
-          margin: 0 auto;
-          touch-action: none;
-        }
-        
-        .joystick-base {
-          width: 120px;
-          height: 120px;
-          background: rgba(255, 255, 255, 0.1);
-          border: 2px solid rgba(255, 255, 255, 0.3);
-          border-radius: 50%;
-          position: relative;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        
-        .joystick-stick {
-          width: 50px;
-          height: 50px;
-          background: var(--primary-color);
-          border-radius: 50%;
-          position: absolute;
-          box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-          transform: translateZ(0); /* Attiva l'accelerazione hardware */
-          will-change: transform; /* Suggerisce al browser di ottimizzare le trasformazioni */
         }
         
         .login-container {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 2rem;
-          margin-top: 2rem;
+          gap: 20px;
+          width: 100%;
+          max-width: 600px;
+          padding: 20px;
+          background-color: #2c3e50;
+          border-radius: 10px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
         
         form {
           display: flex;
           flex-direction: column;
-          gap: 1.5rem;
           width: 100%;
-          max-width: 400px;
-          padding: 2rem;
-          background-color: var(--card-bg);
-          border-radius: var(--border-radius);
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+          gap: 15px;
         }
         
         .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+        }
+        
+        label {
+          font-weight: bold;
+        }
+        
+        input {
+          padding: 10px;
+          border-radius: 4px;
+          border: 1px solid #ccc;
+          font-size: 16px;
+        }
+        
+        button {
+          padding: 12px;
+          background-color: #3498db;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          font-size: 16px;
+          cursor: pointer;
+          transition: background-color 0.2s;
+        }
+        
+        button:hover {
+          background-color: #2980b9;
+        }
+        
+        .error {
+          color: #e74c3c;
+          font-weight: bold;
+        }
+        
+        .instructions-card {
+          width: 100%;
+          padding: 15px;
+          background-color: #34495e;
+          border-radius: 8px;
+        }
+        
+        .instructions-card h2 {
+          margin-top: 0;
+          margin-bottom: 10px;
+          color: #3498db;
+        }
+        
+        .instructions-card ul {
+          margin: 0;
+          padding-left: 20px;
+          line-height: 1.5;
+        }
+        
+        .game-container {
+          width: 100%;
+          max-width: 840px;
+          padding: 20px;
+          background-color: #2c3e50;
+          border-radius: 10px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 15px;
+        }
+        
+        .game-info {
+          width: 100%;
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
         
-        label {
-          font-weight: 500;
-          color: var(--text-secondary);
-        }
-        
-        button {
-          margin-top: 1rem;
-        }
-        
-        .instructions-card {
-          width: 100%;
-          max-width: 400px;
-          padding: 1.5rem;
-          background-color: var(--card-bg);
-          border-radius: var(--border-radius);
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-          text-align: left;
-        }
-        
-        .instructions-card h2 {
-          margin-bottom: 1rem;
-          font-size: 1.2rem;
-          color: var(--text-color);
-        }
-        
-        .instructions-card ul {
-          padding-left: 1.2rem;
-          color: var(--text-secondary);
-        }
-        
-        .instructions-card li {
-          margin-bottom: 0.5rem;
-        }
-        
-        .instructions-card strong {
-          color: var(--primary-color);
-        }
-        
-        .game-info {
-          margin-top: 1.5rem;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-          width: 100%;
-        }
-        
-        .controls {
-          font-size: 0.9rem;
-          color: var(--text-secondary);
-          text-align: center;
-          margin-top: 0.5rem;
-        }
-        
         .connection-status {
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 10px;
-          margin-top: 10px;
-          font-size: 0.9rem;
-          color: var(--text-secondary);
+          gap: 5px;
         }
         
         .status-indicator {
-          width: 10px;
-          height: 10px;
+          width: 12px;
+          height: 12px;
           border-radius: 50%;
           display: inline-block;
         }
         
-        .status-indicator.connected {
-          background-color: #22c55e;
-          box-shadow: 0 0 5px #22c55e;
+        .connected {
+          background-color: #2ecc71;
         }
         
-        .status-indicator.connecting {
-          background-color: #eab308;
-          box-shadow: 0 0 5px #eab308;
+        .disconnected {
+          background-color: #e74c3c;
         }
         
-        .status-indicator.disconnesso, .status-indicator.errore, .status-indicator.inattivo {
-          background-color: #ef4444;
-          box-shadow: 0 0 5px #ef4444;
-        }
-        
-        .debug-button {
-          background-color: #333;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          padding: 4px 8px;
-          font-size: 0.8rem;
-          cursor: pointer;
-          margin-left: 10px;
-        }
-        
-        .debug-button:hover {
-          background-color: #555;
-        }
-        
-        /* Media query per dispositivi mobili */
         @media (max-width: 768px) {
-          .container {
-            padding: 0.5rem;
-          }
-          
-          h1 {
-            font-size: 2rem;
-            margin-bottom: 1rem;
-          }
-          
-          #game-container {
-            padding: 1rem;
-          }
-          
-          canvas {
-            width: 100%;
-            height: auto;
-            max-height: 80vh;
-            aspect-ratio: 4/3;
-          }
-          
-          .controls-container {
+          .game-container {
             padding: 10px;
           }
           
-          .joystick-base {
-            width: 100px;
-            height: 100px;
-          }
-          
-          .joystick-stick {
-            width: 40px;
-            height: 40px;
+          .game-info {
+            flex-direction: column;
+            gap: 10px;
           }
         }
       `}</style>
