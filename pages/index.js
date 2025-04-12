@@ -54,6 +54,8 @@ export default function Home() {
   const [playerState, setPlayerState] = useState(null);
   const [foodItems, setFoodItems] = useState([{ x: 0, y: 0 }]); 
   const [otherPlayers, setOtherPlayers] = useState([]);
+  const [players, setPlayers] = useState({});
+  const [interpolatedPlayers, setInterpolatedPlayers] = useState({});
   const [playerId, setPlayerId] = useState(null);
   const [score, setScore] = useState(0);
   const [foodAnimation, setFoodAnimation] = useState(0);
@@ -80,6 +82,18 @@ export default function Home() {
   const [lastMessageTime, setLastMessageTime] = useState(null);
   const [debugMode, setDebugMode] = useState(process.env.NODE_ENV !== 'production');
   
+  const lastInterpolationTimeRef = useRef(0);
+  const frameCountRef = useRef(0);
+  const lastFrameTimeRef = useRef(0);
+  const fpsLastUpdateRef = useRef(0);
+  const fpsRef = useRef(0);
+  const snakeRef = useRef(null);
+  const foodRef = useRef(null);
+  const staticRenderCounterRef = useRef(0);
+  const pingRef = useRef(0);
+  const lastSocketMessageTimeRef = useRef(0);
+  const animationIdRef = useRef(null);
+  
   // Rileva dispositivo mobile al caricamento
   useEffect(() => {
     setIsMobile(isMobileDevice());
@@ -105,39 +119,45 @@ export default function Home() {
     preRenderStaticElements();
   }, []);
   
-  // Pre-rendering degli elementi statici (sfondo e griglia)
+  // Funzione per pre-renderizzare gli elementi statici in un canvas separato
   const preRenderStaticElements = () => {
-    if (!staticElementsRef.current) return;
+    if (!canvasRef.current) return;
     
-    const ctx = staticElementsRef.current.getContext('2d', { alpha: false });
-    const canvas = staticElementsRef.current;
-    const gridSize = gridSizeRef.current;
-    
-    // Sfondo nero solido (più veloce)
-    ctx.fillStyle = '#121212';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Disegna griglia solo su desktop e solo una volta
-    if (!isMobile) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-      ctx.lineWidth = 0.5;
-      
-      // Disegna linee verticali
-      for (let x = 0; x <= canvas.width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-      
-      // Disegna linee orizzontali
-      for (let y = 0; y <= canvas.height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-      }
+    // Crea un canvas offscreen per gli elementi statici se non esiste
+    if (!staticElementsRef.current) {
+      staticElementsRef.current = document.createElement('canvas');
+      staticElementsRef.current.width = canvasRef.current.width;
+      staticElementsRef.current.height = canvasRef.current.height;
     }
+    
+    // Ottieni il contesto 2D del canvas offscreen
+    const staticCtx = staticElementsRef.current.getContext('2d');
+    
+    // Renderizza lo sfondo
+    staticCtx.fillStyle = '#1a1a1a';
+    staticCtx.fillRect(0, 0, staticElementsRef.current.width, staticElementsRef.current.height);
+    
+    // Renderizza la griglia
+    staticCtx.strokeStyle = '#2a2a2a';
+    staticCtx.lineWidth = 1;
+    
+    // Disegna linee orizzontali
+    for (let y = 0; y < staticElementsRef.current.height; y += gridSizeRef.current) {
+      staticCtx.beginPath();
+      staticCtx.moveTo(0, y);
+      staticCtx.lineTo(staticElementsRef.current.width, y);
+      staticCtx.stroke();
+    }
+    
+    // Disegna linee verticali
+    for (let x = 0; x < staticElementsRef.current.width; x += gridSizeRef.current) {
+      staticCtx.beginPath();
+      staticCtx.moveTo(x, 0);
+      staticCtx.lineTo(x, staticElementsRef.current.height);
+      staticCtx.stroke();
+    }
+    
+    console.log('Elementi statici pre-renderizzati');
   };
   
   // Loop di gioco con setInterval (più stabile)
@@ -157,6 +177,7 @@ export default function Home() {
       let frameCount = 0;
       let lastFoodRenderTime = 0;
       let lastOtherPlayersRenderTime = 0;
+      let lastInterpolationTime = 0;
       
       // Framerate ottimizzato per il dispositivo
       const fpsLimit = isMobile ? 40 : 60;
@@ -165,292 +186,150 @@ export default function Home() {
       // Frequenza di aggiornamento ridotta per elementi non critici
       const foodUpdateInterval = 500; // Aggiorna il cibo ogni 500ms
       const otherPlayersUpdateInterval = isMobile ? 200 : 100; // Aggiorna altri giocatori con frequenza diversa
+      const interpolationInterval = 1000 / 30; // Interpolazione a 30fps
+      
+      // Sistema di interpolazione per movimenti più fluidi
+      const interpolatePositions = (timestamp) => {
+        // Salta se non ci sono giocatori da interpolare
+        if (Object.keys(players).length === 0) return;
+        
+        // Calcola il delta time dal precedente aggiornamento
+        const deltaTime = lastInterpolationTimeRef.current ? (timestamp - lastInterpolationTimeRef.current) / 1000 : 0;
+        lastInterpolationTimeRef.current = timestamp;
+        
+        // Clona lo stato attuale
+        const newInterpolated = {...interpolatedPlayers};
+        
+        // Aggiorna le posizioni interpolate per ogni giocatore remoto
+        Object.keys(players).forEach(pid => {
+          // Salta il giocatore locale
+          if (pid === playerId) return;
+          
+          const player = players[pid];
+          
+          // Salta se il giocatore non ha un serpente o direzione
+          if (!player || !player.snake || !player.direction) return;
+          
+          // Inizializza se non esiste già
+          if (!newInterpolated[pid]) {
+            newInterpolated[pid] = {...player};
+          } else {
+            // Calcola la nuova posizione della testa in base alla direzione e velocità
+            const head = [...player.snake[0]];
+            const speed = player.speed || 5; // Pixels per second
+            const distanceToMove = speed * deltaTime;
+            
+            // Calcola la nuova posizione in base alla direzione
+            switch (player.direction) {
+              case 'up':
+                head[1] -= distanceToMove;
+                break;
+              case 'down':
+                head[1] += distanceToMove;
+                break;
+              case 'left':
+                head[0] -= distanceToMove;
+                break;
+              case 'right':
+                head[0] += distanceToMove;
+                break;
+            }
+            
+            // Aggiorna la posizione interpolata
+            const newSnake = [head, ...player.snake.slice(0, -1)];
+            newInterpolated[pid] = {
+              ...player,
+              snake: newSnake
+            };
+          }
+        });
+        
+        // Aggiorna lo stato con le nuove posizioni
+        setInterpolatedPlayers(newInterpolated);
+      };
       
       const renderLoop = (timestamp) => {
-        frameId = requestAnimationFrame(renderLoop);
-        const elapsed = timestamp - lastRenderTime;
+        if (!canvasRef.current) return;
         
-        // Limita gli FPS per stabilizzare le performance
-        if (elapsed < frameInterval) return;
+        // Calcola FPS e il tempo tra i frame
+        const deltaTime = lastFrameTimeRef.current ? timestamp - lastFrameTimeRef.current : 0;
+        frameCountRef.current++;
         
-        // Calcola il delta time per animazioni fluide indipendenti dal framerate
-        const deltaTime = elapsed / 1000;
-        lastRenderTime = timestamp - (elapsed % frameInterval);
-        frameCount++;
-        
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        
-        const ctx = canvas.getContext('2d', { alpha: false });
-        if (!ctx) return;
-        
-        // Ottimizzazioni rendering
-        if (isMobile) {
-          ctx.imageSmoothingEnabled = false;
+        // Aggiorna FPS ogni secondo
+        if (timestamp - fpsLastUpdateRef.current >= 1000) {
+          fpsRef.current = Math.round((frameCountRef.current * 1000) / (timestamp - fpsLastUpdateRef.current));
+          frameCountRef.current = 0;
+          fpsLastUpdateRef.current = timestamp;
         }
         
-        // Verifica che playerState.snake sia disponibile
-        if (!playerState || !playerState.snake || playerState.snake.length === 0) return;
+        // Interpolazione posizioni dei giocatori remoti
+        interpolatePositions(timestamp);
         
-        // Usa il buffer canvas per il rendering fuori schermo (molto più veloce)
-        const bufferCtx = bufferCanvasRef.current.getContext('2d', { alpha: false });
+        // Usa il contesto del buffer canvas per il rendering offscreen
+        const bufferCtx = bufferCanvasRef.current.getContext('2d');
+        const mainCtx = canvasRef.current.getContext('2d');
         
-        // Clear buffer canvas
-        bufferCtx.clearRect(0, 0, canvas.width, canvas.height);
+        // Contatore per elementi statici che devono essere renderizzati con minore frequenza
+        staticRenderCounterRef.current = (staticRenderCounterRef.current + 1) % 30;
         
-        // Dimensione della griglia
-        const gridSize = gridSizeRef.current;
+        // Pulisci il buffer canvas
+        bufferCtx.clearRect(0, 0, bufferCanvasRef.current.width, bufferCanvasRef.current.height);
         
-        // 1. Disegna elementi statici (sfondo e griglia) dal pre-rendered canvas
-        bufferCtx.drawImage(staticElementsRef.current, 0, 0);
-        
-        // 2. Aggiorna e disegna il cibo solo quando necessario (meno frequente)
-        const shouldUpdateFood = timestamp - lastFoodRenderTime > foodUpdateInterval;
-        
-        if (shouldUpdateFood && foodItems && foodItems.length > 0) {
-          const foodCtx = foodCanvasRef.current.getContext('2d', { alpha: true });
-          foodCtx.clearRect(0, 0, canvas.width, canvas.height);
-          foodCtx.fillStyle = '#e73c3e';
+        // Copia gli elementi statici sul buffer canvas ogni 30 frame o all'inizio
+        if (staticRenderCounterRef.current === 0 || lastFrameTimeRef.current === 0) {
+          bufferCtx.drawImage(staticElementsRef.current, 0, 0);
+        } else {
+          // Altrimenti, copia gli elementi statici e pulisci solo le aree che cambiano
+          bufferCtx.drawImage(staticElementsRef.current, 0, 0);
           
-          foodItems.forEach(food => {
-            if (!food) return;
-            
-            // Controlla se il cibo è visibile
-            if (food.x < -gridSize || food.x > canvas.width + gridSize || 
-                food.y < -gridSize || food.y > canvas.height + gridSize) {
-              return;
-            }
-            
-            foodCtx.beginPath();
-            foodCtx.arc(
-              food.x + gridSize/2,
-              food.y + gridSize/2,
-              gridSize/2 - 2,
-              0,
-              Math.PI * 2
+          // Pulisci solo le aree che cambiano frequentemente
+          const areasToUpdate = getAreasToUpdate();
+          areasToUpdate.forEach(({x, y, width, height}) => {
+            bufferCtx.clearRect(x, y, width, height);
+            // Ridisegna lo sfondo in queste aree
+            bufferCtx.drawImage(
+              staticElementsRef.current, 
+              x, y, width, height,
+              x, y, width, height
             );
-            foodCtx.fill();
           });
-          
-          lastFoodRenderTime = timestamp;
         }
         
-        // Disegna il cibo dal buffer
-        bufferCtx.drawImage(foodCanvasRef.current, 0, 0);
+        // Renderizza il cibo nel buffer
+        renderFood(bufferCtx);
         
-        // 3. Aggiorna e disegna altri giocatori solo quando necessario
-        const shouldUpdateOtherPlayers = timestamp - lastOtherPlayersRenderTime > otherPlayersUpdateInterval;
+        // Renderizza il giocatore locale e remoti nel buffer
+        renderPlayer(bufferCtx);
         
-        if (shouldUpdateOtherPlayers && otherPlayers && otherPlayers.length > 0) {
-          const otherPlayersCtx = otherPlayersCanvasRef.current.getContext('2d', { alpha: true });
-          otherPlayersCtx.clearRect(0, 0, canvas.width, canvas.height);
-          
-          // Calcola il campo visivo del giocatore (per ottimizzare rendering)
-          let visiblePlayers = 0;
-          const viewportPadding = 100; // Padding extra oltre il viewport
-          const viewportRect = {
-            x: -viewportPadding,
-            y: -viewportPadding,
-            width: canvas.width + (viewportPadding * 2),
-            height: canvas.height + (viewportPadding * 2)
-          };
-          
-          // Rendering prioritario: serpi più vicini prima
-          const sortedPlayers = [...otherPlayers].sort((a, b) => {
-            if (!a.snake || !a.snake[0] || !b.snake || !b.snake[0]) return 0;
-            if (!playerState.snake || !playerState.snake[0]) return 0;
-            
-            const playerHead = playerState.snake[0];
-            const distA = Math.sqrt(
-              Math.pow(a.snake[0].x - playerHead.x, 2) + 
-              Math.pow(a.snake[0].y - playerHead.y, 2)
-            );
-            const distB = Math.sqrt(
-              Math.pow(b.snake[0].x - playerHead.x, 2) + 
-              Math.pow(b.snake[0].y - playerHead.y, 2)
-            );
-            
-            return distA - distB; // I più vicini prima
-          });
-          
-          sortedPlayers.forEach(player => {
-            // Verifica più rigorosa degli altri giocatori
-            if (player && player.id && player.snake && player.snake.length > 0) {
-              // Verifica se il giocatore è visibile (nel viewport)
-              const head = player.snake[0];
-              const isVisible = 
-                head.x >= viewportRect.x && head.x <= viewportRect.x + viewportRect.width &&
-                head.y >= viewportRect.y && head.y <= viewportRect.y + viewportRect.height;
-              
-              if (!isVisible) return; // Salta giocatori fuori dallo schermo
-              
-              visiblePlayers++;
-              
-              // LOD (Level of Detail) basato sulla distanza
-              const playerHead = playerState.snake[0];
-              const dist = Math.sqrt(
-                Math.pow(head.x - playerHead.x, 2) + 
-                Math.pow(head.y - playerHead.y, 2)
-              );
-              
-              // Semplifica il rendering per serpenti lontani
-              const isDistant = dist > 300;
-              const segmentsToRender = isDistant ? 
-                Math.min(3, player.snake.length) : // Solo testa e 2 segmenti
-                player.snake.length; // Tutto il serpente
-              
-              // Disegna il nome solo se non è troppo lontano
-              if (!isDistant) {
-                const nameX = head.x + gridSize/2;
-                const nameY = head.y - 8;
-                
-                otherPlayersCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                otherPlayersCtx.fillRect(head.x - 40, head.y - 20, 80, 16);
-                
-                otherPlayersCtx.fillStyle = 'white';
-                otherPlayersCtx.font = '12px Arial';
-                otherPlayersCtx.textAlign = 'center';
-                otherPlayersCtx.fillText(player.name || 'Giocatore', nameX, nameY);
-              }
-              
-              // Disegna il serpente con dettaglio variabile
-              const simplifiedRendering = isMobile || isDistant;
-              
-              for (let i = 0; i < segmentsToRender; i++) {
-                const segment = player.snake[i];
-                if (!segment) continue;
-                
-                // Salta segmenti non visibili
-                if (segment.x < viewportRect.x || segment.x > viewportRect.x + viewportRect.width || 
-                    segment.y < viewportRect.y || segment.y > viewportRect.y + viewportRect.height) {
-                  continue;
-                }
-                
-                // Disegna il bordo solo per la testa e su desktop
-                if (i === 0 && !simplifiedRendering) {
-                  otherPlayersCtx.lineWidth = 2;
-                  otherPlayersCtx.strokeStyle = 'white';
-                  otherPlayersCtx.beginPath();
-                  otherPlayersCtx.arc(
-                    segment.x + gridSize/2,
-                    segment.y + gridSize/2,
-                    gridSize/2 + 1,
-                    0,
-                    Math.PI * 2
-                  );
-                  otherPlayersCtx.stroke();
-                }
-                
-                // Disegna il corpo
-                otherPlayersCtx.fillStyle = player.color || '#00ff00';
-                otherPlayersCtx.beginPath();
-                otherPlayersCtx.arc(
-                  segment.x + gridSize/2,
-                  segment.y + gridSize/2,
-                  i === 0 ? gridSize/2 : gridSize/2 - 2,
-                  0,
-                  Math.PI * 2
-                );
-                otherPlayersCtx.fill();
-              }
-            }
-          });
-          
-          // Salva il conteggio giocatori visibili
-          bufferCtx.playerCount = visiblePlayers;
-          lastOtherPlayersRenderTime = timestamp;
-        }
+        // Renderizza l'interfaccia utente nel buffer
+        renderUI(bufferCtx);
         
-        // Disegna altri giocatori dal buffer
-        bufferCtx.drawImage(otherPlayersCanvasRef.current, 0, 0);
-        
-        // 4. Disegna il proprio serpente (priorità massima)
-        if (playerState && playerState.snake && playerState.snake.length > 0) {
-          // Disegna il nome del giocatore
+        // Mostra informazioni di debug se la modalità debug è attiva
+        if (debugMode) {
           bufferCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-          bufferCtx.fillRect(playerState.snake[0].x - 40, playerState.snake[0].y - 20, 80, 16);
+          bufferCtx.fillRect(10, canvasRef.current.height - 100, 300, 90);
           
           bufferCtx.fillStyle = 'white';
-          bufferCtx.font = '12px Arial';
-          bufferCtx.textAlign = 'center';
-          bufferCtx.fillText(playerName || 'Tu', playerState.snake[0].x + gridSize/2, playerState.snake[0].y - 8);
+          bufferCtx.font = '12px monospace';
+          bufferCtx.textAlign = 'left';
           
-          // Effetti speciali per desktop, stile semplificato per mobile
-          const useSimpleStyle = isMobile;
-          
-          // Disegna il serpente
-          playerState.snake.forEach((segment, i) => {
-            if (!segment) return;
-            
-            // Disegna un cerchio più grande per rendere più visibile la testa
-            if (i === 0) {
-              bufferCtx.fillStyle = 'white';
-              bufferCtx.beginPath();
-              bufferCtx.arc(
-                segment.x + gridSize/2,
-                segment.y + gridSize/2,
-                gridSize/2 + 2,
-                0,
-                Math.PI * 2
-              );
-              bufferCtx.fill();
-              
-              // Effetto luminoso per la testa (solo desktop)
-              if (!useSimpleStyle) {
-                bufferCtx.shadowColor = playerColor;
-                bufferCtx.shadowBlur = 5;
-              }
-            }
-            
-            // Cerchio interno colorato
-            bufferCtx.fillStyle = playerColor;
-            bufferCtx.beginPath();
-            bufferCtx.arc(
-              segment.x + gridSize/2,
-              segment.y + gridSize/2,
-              i === 0 ? gridSize/2 : gridSize/2 - 2,
-              0,
-              Math.PI * 2
-            );
-            bufferCtx.fill();
-            
-            // Resetta l'effetto shadow
-            if (!useSimpleStyle) {
-              bufferCtx.shadowBlur = 0;
-            }
-          });
+          // Mostra FPS, numero di giocatori, ping, direzione e ultimo messaggio socket
+          bufferCtx.fillText(`FPS: ${fpsRef.current}`, 20, canvasRef.current.height - 80);
+          bufferCtx.fillText(`Giocatori: ${Object.keys(players).length + 1}`, 20, canvasRef.current.height - 65);
+          bufferCtx.fillText(`Ping: ${pingRef.current}ms`, 20, canvasRef.current.height - 50);
+          bufferCtx.fillText(`Direzione: ${directionRef.current}`, 20, canvasRef.current.height - 35);
+          bufferCtx.fillText(`Ultimo socket: ${Date.now() - lastSocketMessageTimeRef.current}ms fa`, 20, canvasRef.current.height - 20);
         }
         
-        // 5. Disegna stats (UI overlay)
-        bufferCtx.fillStyle = 'white';
-        bufferCtx.font = 'bold 16px Arial';
-        bufferCtx.textAlign = 'left';
-        bufferCtx.fillText(`Punteggio: ${score}`, 10, 25);
+        // Copia il buffer canvas sul canvas principale
+        mainCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        mainCtx.drawImage(bufferCanvasRef.current, 0, 0);
         
-        bufferCtx.textAlign = 'right';
-        const visiblePlayers = bufferCtx.playerCount || 0;
-        bufferCtx.fillText(`Giocatori: ${visiblePlayers + 1}`, canvas.width - 10, 25);
+        // Aggiorna il tempo dell'ultimo frame
+        lastFrameTimeRef.current = timestamp;
         
-        // Debug info per multiplayer
-        renderDebugInfo(bufferCtx, canvas, otherPlayers, visiblePlayers);
-        
-        // FPS counter (solo in sviluppo)
-        if (process.env.NODE_ENV !== 'production') {
-          if (frameCount % 30 === 0) {
-            bufferCtx.fps = Math.round(1000 / elapsed);
-          }
-          
-          if (bufferCtx.fps) {
-            bufferCtx.fillStyle = bufferCtx.fps > 45 ? '#00ff00' : (bufferCtx.fps > 30 ? 'yellow' : 'red');
-            bufferCtx.font = '12px monospace';
-            bufferCtx.textAlign = 'left';
-            bufferCtx.fillText(`FPS: ${bufferCtx.fps}`, 10, 45);
-          }
-        }
-        
-        // 6. Copia il buffer nel canvas visibile (operazione più veloce)
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(bufferCanvasRef.current, 0, 0);
+        // Continua il loop di animazione
+        animationIdRef.current = requestAnimationFrame(renderLoop);
       };
       
       // Avvia il loop di rendering
@@ -467,19 +346,19 @@ export default function Home() {
         
         // Movimento locale basato sulla direzione
         switch (directionRef.current) {
-          case 'up':
+          case 'UP':
             head.y -= gridSize;
             if (head.y < 0) head.y = canvasHeight - gridSize;
             break;
-          case 'down':
+          case 'DOWN':
             head.y += gridSize;
             if (head.y >= canvasHeight) head.y = 0;
             break;
-          case 'left':
+          case 'LEFT':
             head.x -= gridSize;
             if (head.x < 0) head.x = canvasWidth - gridSize;
             break;
-          case 'right':
+          case 'RIGHT':
             head.x += gridSize;
             if (head.x >= canvasWidth) head.x = 0;
             break;
@@ -599,132 +478,212 @@ export default function Home() {
   useEffect(() => {
     if (!gameStarted || !playerId) return;
     
-    try {
-      // Resetta lo stato degli other players
-      setOtherPlayers([]);
-      setConnectionStatus('connessione...');
-      
-      // Inizializza Pusher con opzioni ottimizzate
-      const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
-        enabledTransports: ['ws', 'wss'], // Preferisci WebSocket
-        authEndpoint: `${API_BASE_URL}/api/pusher/auth`, // Endpoint per autenticazione (opzionale)
-        auth: {
-          headers: {
-            'X-Player-ID': playerId // Invia l'ID del giocatore per autenticazione
-          }
-        },
-      });
-      
-      // Sottoscrivi al canale
-      const channel = pusher.subscribe('snake-game');
-      
-      // Ping/pong per verificare stato connessione
-      const pingInterval = setInterval(() => {
-        // Invia un piccolo ping al server per mantenere viva la connessione
-        fetch(`${API_BASE_URL}/api/ping`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ playerId })
-        }).catch(err => console.log('Errore ping:', err));
+    let pusherInstance = null;
+    let channelInstance = null;
+    let isCleaningUp = false;
+    
+    const initializePusher = () => {
+      try {
+        // Resetta lo stato degli other players
+        setOtherPlayers([]);
+        setConnectionStatus('connessione...');
         
-        // Verifica quanto tempo è passato dall'ultimo messaggio
-        if (lastMessageTime) {
-          const now = Date.now();
-          const elapsed = now - lastMessageTime;
-          if (elapsed > 10000) { // 10 secondi senza messaggi
-            setConnectionStatus('inattivo');
-          }
-        }
-      }, 5000);
-      
-      // Log dello stato della connessione
-      pusher.connection.bind('state_change', (states) => {
-        console.log('Stato connessione Pusher:', states.current);
-        setConnectionStatus(states.current);
+        console.log('Inizializzazione nuova connessione Pusher');
         
-        // Se la connessione è stata stabilita, aggiorna il timestamp
-        if (states.current === 'connected') {
-          setLastMessageTime(Date.now());
-        }
-      });
-      
-      // Gestisci l'evento player-joined
-      channel.bind('player-joined', (data) => {
-        if (!data) return;
-        setLastMessageTime(Date.now());
-        
-        console.log('Ricevuto evento player-joined:', 
-          data.player ? data.player.id : 'nessun player',
-          'Altri giocatori:', data.otherPlayers ? data.otherPlayers.length : 0);
-        
-        // Aggiorna il cibo
-        if (data.foodItems) {
-          setFoodItems(data.foodItems);
-        }
-        
-        // Aggiorna i giocatori - verifica esplicitamente che non siamo noi
-        if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-          const filtered = data.otherPlayers.filter(p => p && p.id && p.id !== playerId);
-          console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
-          setOtherPlayers(filtered);
-        }
-      });
-      
-      // Gestisci l'evento player-moved
-      channel.bind('player-moved', (data) => {
-        if (!data) return;
-        setLastMessageTime(Date.now());
-        
-        // Log meno frequente per non intasare la console
-        if (debugMode && Math.random() < 0.1) {
-          console.log('Ricevuto evento player-moved:', 
-            data.playerId,
-            'Altri giocatori:', data.otherPlayers ? data.otherPlayers.length : 0);
-        }
-        
-        // Aggiorna il cibo
-        if (data.foodItems) {
-          setFoodItems(data.foodItems);
-        }
-        
-        // Aggiorna giocatori - con controllo più stretto
-        if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-          const myId = playerId;
-          const filtered = data.otherPlayers.filter(p => p && p.id && p.id !== myId);
-          
-          // Solo in debug mode
-          if (debugMode && Math.random() < 0.05) {
-            console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
-            if (filtered.length > 0) {
-              console.log('Esempio serpente:', filtered[0].snake ? 
-                `${filtered[0].snake.length} segmenti` : 'nessun serpente');
+        // Inizializza Pusher con opzioni ottimizzate
+        pusherInstance = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
+          cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+          enabledTransports: ['ws', 'wss'], // Preferisci WebSocket
+          disableStats: true, // Disabilita statistiche per ridurre traffico
+          pongTimeout: 10000, // Aumenta timeout
+          activityTimeout: 30000, // Aumenta timeout attività
+          authEndpoint: `${API_BASE_URL}/api/pusher/auth`,
+          auth: {
+            headers: {
+              'X-Player-ID': playerId
             }
+          },
+        });
+        
+        // Sottoscrivi al canale
+        channelInstance = pusherInstance.subscribe('snake-game');
+        
+        // Log dello stato della connessione
+        pusherInstance.connection.bind('state_change', (states) => {
+          if (isCleaningUp) return; // Ignora eventi durante pulizia
+          
+          console.log('Stato connessione Pusher:', states.current);
+          setConnectionStatus(states.current);
+          
+          // Se la connessione è stata stabilita, aggiorna il timestamp
+          if (states.current === 'connected') {
+            setLastMessageTime(Date.now());
+          } else if (states.current === 'disconnected' || states.current === 'failed') {
+            // Tentativo di riconnessione dopo un breve ritardo
+            console.log('Tentativo di riconnessione tra 3 secondi...');
+            setTimeout(() => {
+              if (!isCleaningUp && pusherInstance) {
+                pusherInstance.connect();
+              }
+            }, 3000);
+          }
+        });
+        
+        // Gestisci l'errore di connessione
+        pusherInstance.connection.bind('error', (err) => {
+          if (isCleaningUp) return;
+          console.error('Errore connessione Pusher:', err);
+          setConnectionStatus('errore');
+        });
+        
+        // Gestisci l'evento player-joined
+        channelInstance.bind('player-joined', (data) => {
+          if (isCleaningUp || !data) return;
+          setLastMessageTime(Date.now());
+          
+          console.log('Ricevuto evento player-joined:', 
+            data.player ? data.player.id : 'nessun player',
+            'Altri giocatori:', data.otherPlayers ? data.otherPlayers.length : 0);
+          
+          // Aggiorna il cibo
+          if (data.foodItems) {
+            setFoodItems(data.foodItems);
           }
           
-          setOtherPlayers(filtered);
+          // Aggiorna i giocatori - verifica esplicitamente che non siamo noi
+          if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
+            const filtered = data.otherPlayers.filter(p => p && p.id && p.id !== playerId);
+            console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
+            
+            // Aggiorna timestamp per ogni giocatore
+            const timestampedPlayers = filtered.map(player => ({
+              ...player,
+              lastUpdate: Date.now(),
+              // Imposta direzione per il movimento
+              direction: player.direction || 'right'
+            }));
+            
+            setOtherPlayers(timestampedPlayers);
+          }
+        });
+        
+        // Gestisci l'evento player-moved
+        channelInstance.bind('player-moved', (data) => {
+          if (isCleaningUp || !data) return;
+          setLastMessageTime(Date.now());
+          
+          // Log meno frequente per non intasare la console
+          if (debugMode && Math.random() < 0.1) {
+            console.log('Ricevuto evento player-moved:', 
+              data.playerId,
+              'Altri giocatori:', data.otherPlayers ? data.otherPlayers.length : 0);
+          }
+          
+          // Aggiorna il cibo
+          if (data.foodItems) {
+            setFoodItems(data.foodItems);
+          }
+          
+          // Aggiorna giocatori - con controllo più stretto
+          if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
+            const myId = playerId;
+            const filtered = data.otherPlayers.filter(p => p && p.id && p.id !== myId);
+            
+            // Aggiorna timestamp per ogni giocatore
+            const timestampedPlayers = filtered.map(player => ({
+              ...player,
+              lastUpdate: Date.now(),
+              // Imposta direzione per il movimento
+              direction: player.direction || 'right'
+            }));
+            
+            // Solo in debug mode
+            if (debugMode && Math.random() < 0.05) {
+              console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
+              if (filtered.length > 0) {
+                console.log('Esempio serpente:', filtered[0].snake ? 
+                  `${filtered[0].snake.length} segmenti` : 'nessun serpente');
+              }
+            }
+            
+            setOtherPlayers(timestampedPlayers);
+          }
+        });
+        
+        // Memorizza il riferimento a Pusher
+        pusherRef.current = pusherInstance;
+      } catch (error) {
+        console.error('Errore inizializzazione Pusher:', error);
+        setError('Errore di connessione: ricarica la pagina');
+        setConnectionStatus('errore');
+      }
+    };
+    
+    // Ping/pong per verificare stato connessione
+    const pingInterval = setInterval(() => {
+      if (isCleaningUp) return;
+      
+      // Invia un piccolo ping al server per mantenere viva la connessione
+      fetch(`${API_BASE_URL}/api/ping`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ playerId })
+      }).catch(err => console.log('Errore ping:', err));
+      
+      // Verifica quanto tempo è passato dall'ultimo messaggio
+      if (lastMessageTime) {
+        const now = Date.now();
+        const elapsed = now - lastMessageTime;
+        if (elapsed > 15000) { // 15 secondi senza messaggi
+          setConnectionStatus('inattivo');
+          
+          // Tenta di riconnettere se la connessione è inattiva
+          if (pusherInstance && pusherInstance.connection.state !== 'connected') {
+            console.log('Tentativo di riconnessione per inattività...');
+            pusherInstance.connect();
+          }
         }
-      });
+      }
+    }, 5000);
+    
+    // Avvia l'inizializzazione
+    initializePusher();
+    
+    // Disconnetti al termine
+    return () => {
+      isCleaningUp = true;
+      console.log('Pulizia connessione Pusher...');
+      clearInterval(pingInterval);
       
-      // Memorizza il riferimento a Pusher
-      pusherRef.current = pusher;
+      // Disiscriviti dal canale prima di disconnettere
+      if (channelInstance) {
+        try {
+          console.log('Disiscrivendo dal canale...');
+          channelInstance.unbind_all();
+          pusherInstance.unsubscribe('snake-game');
+        } catch (error) {
+          console.error('Errore durante disiscrivimento:', error);
+        }
+      }
       
-      // Disconnetti al termine
-      return () => {
-        console.log('Disconnessione Pusher');
-        clearInterval(pingInterval);
-        channel.unbind_all();
-        channel.unsubscribe();
-        pusher.disconnect();
+      // Disconnetti Pusher dopo un breve ritardo per permettere al canale di disiscriversi
+      setTimeout(() => {
+        if (pusherInstance) {
+          try {
+            console.log('Disconnessione Pusher...');
+            pusherInstance.disconnect();
+            pusherInstance = null;
+            channelInstance = null;
+            pusherRef.current = null;
+          } catch (error) {
+            console.error('Errore durante disconnessione Pusher:', error);
+          }
+        }
         setConnectionStatus('disconnesso');
-      };
-    } catch (error) {
-      console.error('Errore inizializzazione Pusher:', error);
-      setError('Errore di connessione: ricarica la pagina');
-      setConnectionStatus('errore');
-    }
+      }, 300);
+    };
   }, [gameStarted, playerId, lastMessageTime, debugMode]);
   
   // Nuovo effetto per pulire i giocatori inattivi
@@ -1168,6 +1127,195 @@ export default function Home() {
           );
         }
       });
+    }
+  };
+  
+  // Funzione per calcolare le aree da aggiornare
+  const getAreasToUpdate = () => {
+    const areas = [];
+    const margin = gridSizeRef.current * 2; // Aggiungiamo un margine per sicurezza
+    
+    // Area attorno al serpente locale
+    if (snakeRef.current && snakeRef.current.length > 0) {
+      const head = snakeRef.current[0];
+      areas.push({
+        x: head.x - margin,
+        y: head.y - margin,
+        width: gridSizeRef.current * 2 + margin * 2,
+        height: gridSizeRef.current * 2 + margin * 2
+      });
+    }
+    
+    // Aree attorno ai serpenti remoti
+    Object.values(interpolatedPlayers).forEach(player => {
+      if (!player.snake || player.snake.length === 0) return;
+      
+      const head = player.snake[0];
+      areas.push({
+        x: head.x - margin,
+        y: head.y - margin,
+        width: gridSizeRef.current * 2 + margin * 2,
+        height: gridSizeRef.current * 2 + margin * 2
+      });
+    });
+    
+    // Aree attorno al cibo
+    if (foodItems && foodItems.length > 0) {
+      foodItems.forEach(food => {
+        areas.push({
+          x: food.x - margin / 2,
+          y: food.y - margin / 2,
+          width: gridSizeRef.current + margin,
+          height: gridSizeRef.current + margin
+        });
+      });
+    }
+    
+    return areas;
+  };
+
+  // Funzione per renderizzare il cibo
+  const renderFood = (ctx) => {
+    if (!foodItems || foodItems.length === 0) return;
+    
+    ctx.fillStyle = '#e74c3c'; // Rosso per il cibo
+    foodItems.forEach(item => {
+      ctx.beginPath();
+      ctx.arc(
+        item.x + gridSizeRef.current / 2,
+        item.y + gridSizeRef.current / 2,
+        gridSizeRef.current / 2,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+    });
+  };
+
+  // Funzione per renderizzare i giocatori (locale e remoti)
+  const renderPlayer = (ctx) => {
+    // Renderizza il giocatore locale
+    if (playerState && playerState.snake && playerState.snake.length > 0) {
+      // Aggiorna la reference al serpente locale per l'area di aggiornamento
+      snakeRef.current = playerState.snake;
+      
+      // Disegna il serpente locale in verde
+      ctx.fillStyle = '#2ecc71'; // Verde per il giocatore locale
+      playerState.snake.forEach((segment, index) => {
+        // Testa leggermente più grande
+        const size = index === 0 ? gridSizeRef.current : gridSizeRef.current - 2;
+        ctx.fillRect(
+          segment.x + (gridSizeRef.current - size) / 2,
+          segment.y + (gridSizeRef.current - size) / 2,
+          size,
+          size
+        );
+      });
+
+      // Disegna il nome del giocatore sopra la testa se disponibile
+      if (playerName) {
+        const head = playerState.snake[0];
+        ctx.fillStyle = 'white';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(
+          playerName,
+          head.x + gridSizeRef.current / 2,
+          head.y - 5
+        );
+      }
+    }
+
+    // Renderizza i giocatori remoti interpolati
+    Object.entries(interpolatedPlayers).forEach(([id, player]) => {
+      if (!player.snake || player.snake.length === 0) return;
+      
+      // Disegna il serpente del giocatore remoto in rosso
+      ctx.fillStyle = '#e67e22'; // Arancione per i giocatori remoti
+      player.snake.forEach((segment, index) => {
+        // Testa leggermente più grande
+        const size = index === 0 ? gridSizeRef.current : gridSizeRef.current - 2;
+        ctx.fillRect(
+          segment.x + (gridSizeRef.current - size) / 2,
+          segment.y + (gridSizeRef.current - size) / 2,
+          size,
+          size
+        );
+      });
+
+      // Disegna il nome del giocatore sopra la testa
+      if (player.name) {
+        const head = player.snake[0];
+        ctx.fillStyle = 'white';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(
+          player.name,
+          head.x + gridSizeRef.current / 2,
+          head.y - 5
+        );
+      }
+    });
+  };
+
+  // Funzione per renderizzare l'interfaccia utente
+  const renderUI = (ctx) => {
+    if (!canvasRef.current) return;
+    
+    // Disegna il punteggio in alto a sinistra
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Punteggio: ${score}`, 20, 30);
+    
+    // Disegna il numero di giocatori connessi in alto a destra
+    const playerCount = Object.keys(players).length + 1; // +1 per il giocatore locale
+    ctx.textAlign = 'right';
+    ctx.fillText(
+      `Giocatori: ${playerCount}`,
+      canvasRef.current.width - 20,
+      30
+    );
+    
+    // Mostra messaggi di connessione/disconnessione se presenti
+    if (connectionStatus === 'disconnesso' && Date.now() - lastMessageTime > 3000) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        'Connessione persa',
+        canvasRef.current.width / 2,
+        60
+      );
+    }
+  };
+  
+  // Funzione per renderizzare gli elementi statici
+  const renderStaticElements = (ctx) => {
+    if (!canvasRef.current) return;
+    
+    // Disegna lo sfondo
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      
+    // Disegna la griglia
+    ctx.strokeStyle = '#2a2a2a';
+    ctx.lineWidth = 1;
+    
+    // Disegna linee orizzontali
+    for (let y = 0; y < canvasRef.current.height; y += gridSizeRef.current) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvasRef.current.width, y);
+      ctx.stroke();
+    }
+    
+    // Disegna linee verticali
+    for (let x = 0; x < canvasRef.current.width; x += gridSizeRef.current) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvasRef.current.height);
+      ctx.stroke();
     }
   };
   

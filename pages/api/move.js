@@ -1,6 +1,9 @@
 import Pusher from 'pusher';
 import { players, foodItems, lastActivity } from './shared-state.js';
 
+// Memorizza le ultime connessioni
+const activeConnections = new Map();
+
 // Inizializza Pusher lato server
 const pusher = new Pusher({
   appId: process.env.PUSHER_APP_ID,
@@ -22,18 +25,23 @@ setInterval(() => {
       console.log(`Rimozione giocatore inattivo: ${id}`);
       delete players[id];
       delete lastActivity[id];
+      activeConnections.delete(id);
       removedPlayers = true;
     }
   });
   
   // Notifica tutti i giocatori se sono state fatte rimozioni
   if (removedPlayers) {
-    const activePlayers = Object.values(players);
-    pusher.trigger('snake-game', 'player-moved', {
-      playerId: 'system',
-      otherPlayers: activePlayers,
-      foodItems
-    }).catch(err => console.error('Errore pulizia giocatori:', err));
+    try {
+      const activePlayers = Object.values(players);
+      pusher.trigger('snake-game', 'player-moved', {
+        playerId: 'system',
+        otherPlayers: activePlayers,
+        foodItems
+      }).catch(err => console.error('Errore pulizia giocatori:', err));
+    } catch (error) {
+      console.error('Errore durante notifica rimozione giocatori:', error);
+    }
   }
 }, 10000); // Esegui ogni 10 secondi
 
@@ -88,6 +96,22 @@ function generateNewFoodPosition(gridSize = 20) {
   return { x: newX, y: newY };
 }
 
+// Funzione di invio sicuro via Pusher con retry
+async function safePusherTrigger(channel, event, data, retries = 3) {
+  try {
+    await pusher.trigger(channel, event, data);
+    return true;
+  } catch (error) {
+    console.error(`Errore invio Pusher (tentativi rimasti: ${retries}):`, error);
+    if (retries > 0) {
+      // Attendi un po' e riprova
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return safePusherTrigger(channel, event, data, retries - 1);
+    }
+    return false;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Metodo non consentito' });
@@ -100,6 +124,33 @@ export default async function handler(req, res) {
   }
   
   try {
+    // Assegna un timestamp di connessione se è la prima volta
+    if (!activeConnections.has(playerId)) {
+      activeConnections.set(playerId, {
+        firstSeen: Date.now(),
+        lastSeen: Date.now(),
+        requests: 0
+      });
+    }
+    
+    // Aggiorna ultimo accesso
+    const connection = activeConnections.get(playerId);
+    connection.lastSeen = Date.now();
+    connection.requests++;
+    
+    // Limita frequenza richieste (massimo 10 al secondo)
+    if (connection.requests > 10) {
+      const elapsed = connection.lastSeen - connection.firstSeen;
+      if (elapsed < 1000) {
+        console.warn(`Troppe richieste da ${playerId}: ${connection.requests} in ${elapsed}ms`);
+        connection.requests = 0;
+        connection.firstSeen = Date.now();
+        return res.status(429).json({ message: 'Troppe richieste, rallenta' });
+      }
+      connection.requests = 0;
+      connection.firstSeen = Date.now();
+    }
+    
     // Aggiorna timestamp dell'ultima attività
     lastActivity[playerId] = Date.now();
     
@@ -157,56 +208,52 @@ export default async function handler(req, res) {
     players[playerId] = player;
     
     // Ottieni tutti gli altri giocatori
-    const otherPlayers = Object.values(players).filter(p => p.id !== playerId);
+    const otherPlayers = Object.values(players)
+      .filter(p => p.id !== playerId)
+      // Assicurati che i dati siano validi per evitare errori
+      .map(p => ({
+        id: p.id,
+        name: p.name || 'Giocatore',
+        color: p.color || '#00ff00',
+        score: p.score || 0,
+        snake: p.snake || [],
+        direction: p.direction || 'right'
+      }));
     
-    // Verifica la collisione del giocatore con altri serpenti
-    // Questo è disabilitato per ora, ma potrebbe essere abilitato per aggiungere game over
-    /*
-    const hasCollision = otherPlayers.some(otherPlayer => {
-      if (!otherPlayer.snake) return false;
-      return otherPlayer.snake.some((segment, i) => {
-        // Ignora la testa degli altri serpenti
-        if (i === 0) return false;
-        const distance = Math.sqrt(
-          Math.pow(head.x - segment.x, 2) + 
-          Math.pow(head.y - segment.y, 2)
-        );
-        return distance < gridSize / 2;
-      });
-    });
-    
-    if (hasCollision) {
-      // Reset del giocatore (per ora, potrebbe essere un game over)
-      player.score = 0;
-      // Posiziona il serpente in un punto casuale
-      const startX = Math.floor(Math.random() * 40) * gridSize;
-      const startY = Math.floor(Math.random() * 30) * gridSize;
-      player.snake = [
-        { x: startX, y: startY },
-        { x: startX - gridSize, y: startY },
-        { x: startX - gridSize * 2, y: startY }
-      ];
-    }
-    */
+    // Limita la dimensione dei dati inviati
+    const compactOtherPlayers = otherPlayers.map(p => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      score: p.score,
+      // Invia solo i primi 10 segmenti per ridurre dimensione dati
+      snake: p.snake.slice(0, 10),
+      direction: p.direction
+    }));
     
     // Invia notifica tramite Pusher a tutti gli altri client
-    await pusher.trigger('snake-game', 'player-moved', {
+    const pusherSuccess = await safePusherTrigger('snake-game', 'player-moved', {
       playerId,
       player,
       foodItems,
-      otherPlayers
-    }).catch(err => {
-      console.error('Errore Pusher:', err);
+      otherPlayers: compactOtherPlayers
     });
+    
+    if (!pusherSuccess) {
+      console.warn(`Impossibile inviare notifica Pusher per ${playerId}`);
+    }
     
     // Rispondi al client
     return res.status(200).json({
       player,
       foodItems,
-      otherPlayers
+      otherPlayers: compactOtherPlayers
     });
   } catch (error) {
     console.error('Errore:', error);
-    return res.status(500).json({ message: 'Errore interno del server' });
+    return res.status(500).json({ 
+      message: 'Errore interno del server',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 } 
