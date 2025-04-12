@@ -94,6 +94,9 @@ export default function Home() {
   const lastSocketMessageTimeRef = useRef(0);
   const animationIdRef = useRef(null);
   
+  // Aggiungo un ref per tracciare lo stato di avvio del game loop
+  const gameLoopActiveRef = useRef(false);
+  
   // Rileva dispositivo mobile al caricamento
   useEffect(() => {
     setIsMobile(isMobileDevice());
@@ -162,9 +165,10 @@ export default function Home() {
   
   // Loop di gioco con setInterval (più stabile)
   useEffect(() => {
-    if (!gameStarted || !playerId || !playerState) return;
+    if (!gameStarted || !playerId || !playerState || gameLoopActiveRef.current) return;
 
     console.log('Avvio loop di gioco con setInterval');
+    gameLoopActiveRef.current = true; // Marca il game loop come avviato
     
     // Riferimenti alle variabili locali che verranno chiuse nel cleanup
     let gameLoopActive = true;
@@ -464,6 +468,7 @@ export default function Home() {
     return () => {
       console.log('Pulizia game loop...');
       gameLoopActive = false; // Imposta flag di pulizia
+      gameLoopActiveRef.current = false; // Marca il game loop come non attivo per consentire un riavvio futuro
       
       clearTimeout(timeoutId);
       
@@ -482,7 +487,7 @@ export default function Home() {
         apiLoopRef.current = null;
       }
     };
-  }, [gameStarted, playerId, playerState]);
+  }, [gameStarted, playerId]); // Rimuovo playerState dalle dipendenze per evitare il ciclo
   
   // Funzione di comunicazione con il server semplificata 
   const updateWithServer = async () => {
