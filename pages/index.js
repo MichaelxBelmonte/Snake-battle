@@ -163,70 +163,78 @@ export default function Home() {
     console.log('Elementi statici pre-renderizzati');
   };
   
+  // Gestione input da tastiera
+  useEffect(() => {
+    if (!gameStarted) return;
+    
+    console.log('Attivazione gestione input da tastiera');
+    
+    const handleKeyDown = (e) => {
+      console.log('Tasto premuto:', e.key);
+      
+      // Previeni lo scroll della pagina con le frecce
+      if(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+        e.preventDefault();
+      }
+      
+      let newDirection = directionRef.current;
+      
+      switch(e.key) {
+        case 'ArrowUp':
+          if (lastDirectionRef.current !== 'down') {
+            newDirection = 'up';
+            console.log('Direzione cambiata a: up');
+          }
+          break;
+        case 'ArrowDown':
+          if (lastDirectionRef.current !== 'up') {
+            newDirection = 'down';
+            console.log('Direzione cambiata a: down');
+          }
+          break;
+        case 'ArrowLeft':
+          if (lastDirectionRef.current !== 'right') {
+            newDirection = 'left';
+            console.log('Direzione cambiata a: left');
+          }
+          break;
+        case 'ArrowRight':
+          if (lastDirectionRef.current !== 'left') {
+            newDirection = 'right';
+            console.log('Direzione cambiata a: right');
+          }
+          break;
+      }
+      
+      // Aggiorna la direzione immediatamente
+      if (newDirection !== directionRef.current) {
+        console.log(`Nuova direzione: ${newDirection} (da ${directionRef.current})`);
+        directionRef.current = newDirection;
+      }
+    };
+    
+    // Aggiungi event listener con priorità
+    window.addEventListener('keydown', handleKeyDown, { passive: false });
+    
+    // Forza un input iniziale per far muovere il serpente
+    setTimeout(() => {
+      console.log('Simulazione input iniziale per far muovere il serpente');
+      // Forza la direzione iniziale
+      directionRef.current = 'right';
+      lastDirectionRef.current = 'right';
+    }, 1000);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [gameStarted]);
+  
   // Loop di gioco con setInterval (più stabile)
   useEffect(() => {
-    if (!gameStarted || !playerId || !playerState || gameLoopActiveRef.current) return;
+    if (!gameStarted || !playerId || gameLoopActiveRef.current) return;
 
     console.log('Avvio loop di gioco con setInterval');
     gameLoopActiveRef.current = true; // Marca il game loop come avviato
-    
-    // SUPER DEBUG: Assicuriamoci che il canvas sia visibile con colori MOLTO evidenti
-    if (canvasRef.current) {
-      console.log('Canvas esiste con dimensioni:', canvasRef.current.width, 'x', canvasRef.current.height);
-      
-      // Aggiungiamo uno stile molto evidente
-      canvasRef.current.style.border = '10px solid red';
-      canvasRef.current.style.backgroundColor = '#004400';
-      
-      // Disegniamo qualcosa di base per essere sicuri che sia visibile
-      const ctx = canvasRef.current.getContext('2d');
-      if (ctx) {
-        // Pulisci il canvas e riempilo con un colore di sfondo
-        ctx.fillStyle = '#004400';
-        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-        
-        // Disegna una griglia molto visibile
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.lineWidth = 2;
-        const gridSize = gridSizeRef.current;
-        
-        for (let x = 0; x <= canvasRef.current.width; x += gridSize) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, canvasRef.current.height);
-          ctx.stroke();
-        }
-        
-        for (let y = 0; y <= canvasRef.current.height; y += gridSize) {
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(canvasRef.current.width, y);
-          ctx.stroke();
-        }
-        
-        // Disegna un testo di debug GRANDE
-        ctx.fillStyle = 'white';
-        ctx.font = '48px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('CANVAS DI GIOCO', canvasRef.current.width / 2, canvasRef.current.height / 2 - 50);
-        ctx.fillText('DEBUG MODE', canvasRef.current.width / 2, canvasRef.current.height / 2 + 50);
-        
-        // Disegna anche un serpente di test grande e molto visibile
-        ctx.fillStyle = '#00ff00';
-        for (let i = 0; i < 5; i++) {
-          ctx.fillRect(
-            200 + i * gridSize, 
-            300, 
-            gridSize - 2, 
-            gridSize - 2
-          );
-        }
-      } else {
-        console.error('ERRORE: Context 2D non trovato!');
-      }
-    } else {
-      console.error('ERRORE CRITICO: Canvas non trovato!');
-    }
     
     // Riferimenti alle variabili locali che verranno chiuse nel cleanup
     let gameLoopActive = true;
@@ -238,8 +246,67 @@ export default function Home() {
     const startGameLoops = () => {
       if (!gameLoopActive) return; // Evita avvio se già in pulizia
       
-      // Pre-rendering degli elementi statici
-      preRenderStaticElements();
+      // Loop di movimento locale - movimento più fluido con frequenza moderata
+      moveIntervalId = setInterval(() => {
+        if (!gameLoopActive) return;
+        
+        // Forza il movimento anche se playerState non è disponibile
+        if (!playerState || !playerState.snake || playerState.snake.length === 0) {
+          console.log('ERRORE: PlayerState non disponibile per il movimento');
+          return;
+        }
+        
+        console.log('Esecuzione ciclo di movimento, direzione:', directionRef.current);
+        
+        const gridSize = gridSizeRef.current;
+        const head = { ...playerState.snake[0] };
+        const canvasWidth = 800;
+        const canvasHeight = 600;
+        
+        // Movimento locale basato sulla direzione
+        switch (directionRef.current) {
+          case 'up':
+            head.y -= gridSize;
+            if (head.y < 0) head.y = canvasHeight - gridSize;
+            break;
+          case 'down':
+            head.y += gridSize;
+            if (head.y >= canvasHeight) head.y = 0;
+            break;
+          case 'left':
+            head.x -= gridSize;
+            if (head.x < 0) head.x = canvasWidth - gridSize;
+            break;
+          case 'right':
+            head.x += gridSize;
+            if (head.x >= canvasWidth) head.x = 0;
+            break;
+        }
+        
+        // DEBUG - Stampa informazioni sulla posizione
+        console.log(`Movimento serpente: ${directionRef.current}, nuova posizione: (${head.x}, ${head.y})`);
+        
+        // Aggiorna la posizione localmente
+        setPlayerState(prev => {
+          if (!prev || !prev.snake || prev.snake.length === 0) {
+            console.log('ERRORE: playerState non valido durante aggiornamento');
+            return prev;
+          }
+          
+          const newSnake = [head, ...prev.snake.slice(0, -1)];
+          
+          // Log della nuova posizione della testa
+          console.log(`Nuova posizione testa serpente: (${head.x}, ${head.y}), lunghezza: ${newSnake.length}`);
+          
+          // Crea una copia profonda per evitare mutazioni
+          return {
+            ...prev,
+            snake: newSnake
+          };
+        });
+        
+        lastDirectionRef.current = directionRef.current;
+      }, 300); // 300ms = più lento (3.3 FPS) per debug e facile visualizzazione
       
       // VERSIONE SEMPLIFICATA DEL RENDER LOOP
       const simplifiedRenderLoop = () => {
@@ -274,25 +341,51 @@ export default function Home() {
           ctx.stroke();
         }
         
-        // VERIFICA PRESENZA DATI SERPENTE
-        console.log('RENDER: Stato serpente:', playerState ? 'presente' : 'assente'); 
-        if (playerState && playerState.snake) {
-          console.log('RENDER: Lunghezza serpente:', playerState.snake.length);
-          if (playerState.snake.length > 0) {
-            console.log('RENDER: Posizione testa:', playerState.snake[0].x, playerState.snake[0].y);
-          }
-        }
-        
-        // VERIFICA PRESENZA CIBO
-        console.log('RENDER: Items cibo:', foodItems ? foodItems.length : 0);
+        // Disegna il cibo in modo MOLTO visibile
         if (foodItems && foodItems.length > 0) {
-          console.log('RENDER: Prima posizione cibo:', foodItems[0].x, foodItems[0].y);
+          foodItems.forEach(food => {
+            // Disegna un cerchio giallo più grande per il cibo
+            ctx.fillStyle = '#ffff00'; // Giallo brillante
+            ctx.beginPath();
+            ctx.arc(
+              food.x + gridSize/2,
+              food.y + gridSize/2,
+              gridSize/2 + 2, // Più grande
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Aggiungi un contorno rosso
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(
+              food.x + gridSize/2,
+              food.y + gridSize/2,
+              gridSize/2 + 2,
+              0,
+              Math.PI * 2
+            );
+            ctx.stroke();
+          });
+        } else {
+          // Se non c'è cibo, disegna del cibo di test
+          ctx.fillStyle = '#ffff00'; // Giallo brillante
+          ctx.beginPath();
+          ctx.arc(
+            400,
+            300,
+            gridSize,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
         }
         
-        // MOLTO SEMPLICE: Disegna il serpente locale con dimensioni MAGGIORI
+        // MOLTO SEMPLICE: Disegna il serpente locale
         if (playerState && playerState.snake && playerState.snake.length > 0) {
-          console.log('RENDER: Disegno serpente locale');
-          
+          // Disegna il serpente
           ctx.fillStyle = '#00ff00'; // Verde brillante
           playerState.snake.forEach((segment, index) => {
             // Disegna segmenti più grandi per maggiore visibilità
@@ -361,8 +454,6 @@ export default function Home() {
           }
         } else {
           // Se non c'è un serpente utente, disegna un serpente di test
-          console.log('RENDER: Nessun serpente utente, disegno serpente di test');
-          
           ctx.fillStyle = '#ff00ff'; // Fucsia per alta visibilità
           for (let i = 0; i < 5; i++) {
             ctx.fillRect(
@@ -374,141 +465,32 @@ export default function Home() {
           }
         }
         
-        // Disegna il cibo in modo MOLTO visibile
-        if (foodItems && foodItems.length > 0) {
-          console.log('RENDER: Disegno cibo:', foodItems.length, 'items');
-          
-          foodItems.forEach(food => {
-            // Disegna un cerchio giallo più grande per il cibo
-            ctx.fillStyle = '#ffff00'; // Giallo brillante
-            ctx.beginPath();
-            ctx.arc(
-              food.x + gridSize/2,
-              food.y + gridSize/2,
-              gridSize/2 + 2, // Più grande
-              0,
-              Math.PI * 2
-            );
-            ctx.fill();
-            
-            // Aggiungi un contorno rosso
-            ctx.strokeStyle = '#ff0000';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(
-              food.x + gridSize/2,
-              food.y + gridSize/2,
-              gridSize/2 + 2,
-              0,
-              Math.PI * 2
-            );
-            ctx.stroke();
-          });
-        } else {
-          // Se non c'è cibo, disegna del cibo di test
-          console.log('RENDER: Nessun cibo, disegno cibo di test');
-          
-          ctx.fillStyle = '#ffff00'; // Giallo brillante
-          ctx.beginPath();
-          ctx.arc(
-            400,
-            300,
-            gridSize,
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-          
-          ctx.strokeStyle = '#ff0000';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(
-            400,
-            300,
-            gridSize,
-            0,
-            Math.PI * 2
-          );
-          ctx.stroke();
-        }
-        
         // Informazioni di debug
         ctx.fillStyle = 'white';
         ctx.font = '20px Arial';
         ctx.textAlign = 'left';
         ctx.fillText(`Punteggio: ${score}`, 20, 30);
         ctx.fillText(`Direzione: ${directionRef.current}`, 20, 60);
-        ctx.fillText(`Giocatori: ${Object.keys(players).length + 1}`, 20, 90);
         
         // Disegna le coordinate del serpente
         if (playerState && playerState.snake && playerState.snake.length > 0) {
           const head = playerState.snake[0];
-          ctx.fillText(`Posizione: (${head.x}, ${head.y})`, 20, 120);
-        } else {
-          ctx.fillText(`SERPENTE NON INIZIALIZZATO`, 20, 120);
+          ctx.fillText(`Posizione: (${head.x}, ${head.y})`, 20, 90);
+          ctx.fillText(`Frame: ${frameCountRef.current}`, 20, 120);
         }
         
-        // Aggiungi ulteriori informazioni di debug
-        ctx.fillText(`Canvas: ${canvasRef.current.width}x${canvasRef.current.height}`, 20, 150);
-        ctx.fillText(`Cibo: ${foodItems ? foodItems.length : 'N/A'}`, 20, 180);
+        // Incremento contatore frame per debug
+        frameCountRef.current++;
         
         // Continua il loop
         animFrameId = requestAnimationFrame(simplifiedRenderLoop);
       };
       
+      // Reset contatore frame
+      frameCountRef.current = 0;
+      
       // Avvia il loop di rendering semplificato
       animFrameId = requestAnimationFrame(simplifiedRenderLoop);
-      
-      // Loop di movimento locale - movimento più fluido con frequenza moderata
-      moveIntervalId = setInterval(() => {
-        if (!playerState || !playerState.snake || playerState.snake.length === 0 || !gameLoopActive) return;
-        
-        const gridSize = gridSizeRef.current;
-        const head = { ...playerState.snake[0] };
-        const canvasWidth = 800;
-        const canvasHeight = 600;
-        
-        // Movimento locale basato sulla direzione
-        switch (directionRef.current) {
-          case 'up':
-            head.y -= gridSize;
-            if (head.y < 0) head.y = canvasHeight - gridSize;
-            break;
-          case 'down':
-            head.y += gridSize;
-            if (head.y >= canvasHeight) head.y = 0;
-            break;
-          case 'left':
-            head.x -= gridSize;
-            if (head.x < 0) head.x = canvasWidth - gridSize;
-            break;
-          case 'right':
-            head.x += gridSize;
-            if (head.x >= canvasWidth) head.x = 0;
-            break;
-        }
-        
-        // DEBUG - Stampa informazioni sulla posizione
-        console.log(`Movimento serpente: ${directionRef.current}, nuova posizione: (${head.x}, ${head.y})`);
-        
-        // Aggiorna la posizione localmente (solo se lo stato è valido)
-        setPlayerState(prev => {
-          if (!prev || !prev.snake || prev.snake.length === 0) return prev;
-          
-          const newSnake = [head, ...prev.snake.slice(0, -1)];
-          
-          // Log della nuova posizione della testa
-          console.log(`Nuova posizione testa serpente: (${head.x}, ${head.y}), lunghezza: ${newSnake.length}`);
-          
-          // Crea una copia profonda per evitare mutazioni
-          return {
-            ...prev,
-            snake: newSnake
-          };
-        });
-        
-        lastDirectionRef.current = directionRef.current;
-      }, 1000 / 5); // Più lento per debug (5 FPS)
       
       // Comunicazione col server - frequenza adeguata ai requisiti
       serverIntervalId = setInterval(() => {
@@ -525,6 +507,28 @@ export default function Home() {
     // Avvia i loops con un piccolo ritardo per evitare sfarfallio
     const timeoutId = setTimeout(startGameLoops, 500);
     
+    // Debug: movimento automatico per test
+    const autoMoveTimeoutId = setTimeout(() => {
+      // Sequenza di movimenti automatici per test
+      console.log('Avvio movimento automatico per test');
+      
+      // Movimento automatico ogni 2 secondi
+      const autoMoveIntervalId = setInterval(() => {
+        console.log('Movimento automatico');
+        
+        // Cambia direzione in sequenza
+        const directions = ['right', 'down', 'left', 'up'];
+        const currentIndex = directions.indexOf(directionRef.current);
+        const nextIndex = (currentIndex + 1) % directions.length;
+        directionRef.current = directions[nextIndex];
+        
+        console.log('Direzione automatica:', directionRef.current);
+      }, 2000);
+      
+      // Aggiungi l'intervallo alla pulizia
+      return () => clearInterval(autoMoveIntervalId);
+    }, 3000);
+    
     // Pulizia
     return () => {
       console.log('Pulizia game loop...');
@@ -532,6 +536,7 @@ export default function Home() {
       gameLoopActiveRef.current = false; // Marca il game loop come non attivo per consentire un riavvio futuro
       
       clearTimeout(timeoutId);
+      clearTimeout(autoMoveTimeoutId);
       
       // Pulisci tutti gli interval e timeout
       if (moveIntervalId) clearInterval(moveIntervalId);
@@ -548,7 +553,7 @@ export default function Home() {
         apiLoopRef.current = null;
       }
     };
-  }, [gameStarted, playerId]); // Rimuovo playerState dalle dipendenze per evitare il ciclo
+  }, [gameStarted, playerId]);
   
   // Funzione di comunicazione con il server semplificata 
   const updateWithServer = async () => {
@@ -944,42 +949,6 @@ export default function Home() {
     
     return () => {
       clearInterval(cleanupInterval);
-    };
-  }, [gameStarted]);
-  
-  // Gestione input da tastiera
-  useEffect(() => {
-    if (!gameStarted) return;
-    
-    const handleKeyDown = (e) => {
-      switch(e.key) {
-        case 'ArrowUp':
-          if (lastDirectionRef.current !== 'down') {
-            directionRef.current = 'up';
-          }
-          break;
-        case 'ArrowDown':
-          if (lastDirectionRef.current !== 'up') {
-            directionRef.current = 'down';
-          }
-          break;
-        case 'ArrowLeft':
-          if (lastDirectionRef.current !== 'right') {
-            directionRef.current = 'left';
-          }
-          break;
-        case 'ArrowRight':
-          if (lastDirectionRef.current !== 'left') {
-            directionRef.current = 'right';
-          }
-          break;
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [gameStarted]);
   
