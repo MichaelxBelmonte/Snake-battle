@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import Pusher from 'pusher-js';
+import Link from 'next/link';
+import Head from 'next/head';
 
-// URL dell'API da utilizzare in produzione o in sviluppo
-const API_BASE_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://snake-battle.vercel.app' 
-  : '';  // In sviluppo, usa URL relativo
+// URL API - punta all'endpoint giusto in base all'ambiente
+const API_BASE_URL = typeof window !== 'undefined' && window.location.hostname.includes('localhost')
+  ? 'http://localhost:30003000'
+  : 'https://snake-battle.vercel.app';
 
 // Funzioni di utilità per i colori
 const darkenColor = (hex, percent) => {
@@ -46,1791 +48,445 @@ const isMobileDevice = () => {
 
 export default function Home() {
   const [playerName, setPlayerName] = useState('');
-  const [playerColor, setPlayerColor] = useState('#ff0000');
+  const [playerColor, setPlayerColor] = useState('#4CAF50');
   const [gameStarted, setGameStarted] = useState(false);
   const [error, setError] = useState('');
   
-  // Stato locale del gioco
-  const [playerState, setPlayerState] = useState(null);
-  const [foodItems, setFoodItems] = useState([{ x: 0, y: 0 }]); 
-  const [otherPlayers, setOtherPlayers] = useState([]);
-  const [players, setPlayers] = useState({});
-  const [interpolatedPlayers, setInterpolatedPlayers] = useState({});
-  const [playerId, setPlayerId] = useState(null);
+  // Stati fondamentali ridotti al minimo
+  const [snake, setSnake] = useState([
+    { x: 100, y: 100 },
+    { x: 80, y: 100 },
+    { x: 60, y: 100 }
+  ]);
+  const [food, setFood] = useState([{ x: 300, y: 300 }]);
+  const [direction, setDirection] = useState('right');
   const [score, setScore] = useState(0);
-  const [foodAnimation, setFoodAnimation] = useState(0);
-  const [isMobile, setIsMobile] = useState(false);
-  const [scale, setScale] = useState(1); // Fattore di scala per il canvas
   
+  // Riferimenti essenziali
   const canvasRef = useRef(null);
-  const joystickRef = useRef(null);
-  const pusherRef = useRef(null);
-  const renderLoopRef = useRef(null);
-  const apiLoopRef = useRef(null);
-  const directionRef = useRef('right');
-  const lastDirectionRef = useRef('right');
-  const gridSizeRef = useRef(20); // Dimensione della griglia costante
+  const gameLoopRef = useRef(null);
+  const gridSize = 20; // Dimensione della cella costante
   
-  // Canvas buffer per rendering offscreen
-  const bufferCanvasRef = useRef(null);
-  const staticElementsRef = useRef(null);
-  const foodCanvasRef = useRef(null);
-  const otherPlayersCanvasRef = useRef(null);
-
-  // Aggiungo stato per tracciare la connessione e debug
-  const [connectionStatus, setConnectionStatus] = useState('disconnesso');
-  const [lastMessageTime, setLastMessageTime] = useState(null);
-  const [debugMode, setDebugMode] = useState(process.env.NODE_ENV !== 'production');
+  // Rilevamento mobile semplificato
+  const [isMobile, setIsMobile] = useState(false);
   
-  const lastInterpolationTimeRef = useRef(0);
-  const frameCountRef = useRef(0);
-  const lastFrameTimeRef = useRef(0);
-  const fpsLastUpdateRef = useRef(0);
-  const fpsRef = useRef(0);
-  const snakeRef = useRef(null);
-  const foodRef = useRef(null);
-  const staticRenderCounterRef = useRef(0);
-  const pingRef = useRef(0);
-  const lastSocketMessageTimeRef = useRef(0);
-  const animationIdRef = useRef(null);
-  
-  // Aggiungo un ref per tracciare lo stato di avvio del game loop
-  const gameLoopActiveRef = useRef(false);
-  
-  // Rileva dispositivo mobile al caricamento
+  // Rileva dispositivo mobile all'avvio
   useEffect(() => {
-    setIsMobile(isMobileDevice());
+    const checkMobile = () => {
+      return (typeof window !== "undefined" && window.innerWidth < 768);
+    };
     
-    // Inizializza i buffer canvas per il rendering ottimizzato
-    bufferCanvasRef.current = document.createElement('canvas');
-    bufferCanvasRef.current.width = 800;
-    bufferCanvasRef.current.height = 600;
+    setIsMobile(checkMobile());
     
-    staticElementsRef.current = document.createElement('canvas');
-    staticElementsRef.current.width = 800;
-    staticElementsRef.current.height = 600;
+    const handleResize = () => {
+      setIsMobile(checkMobile());
+    };
     
-    foodCanvasRef.current = document.createElement('canvas');
-    foodCanvasRef.current.width = 800;
-    foodCanvasRef.current.height = 600;
-    
-    otherPlayersCanvasRef.current = document.createElement('canvas');
-    otherPlayersCanvasRef.current.width = 800;
-    otherPlayersCanvasRef.current.height = 600;
-    
-    // Pre-rendering degli elementi statici
-    preRenderStaticElements();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
   
-  // Funzione per pre-renderizzare gli elementi statici in un canvas separato
-  const preRenderStaticElements = () => {
-    if (!canvasRef.current) return;
-    
-    // Crea un canvas offscreen per gli elementi statici se non esiste
-    if (!staticElementsRef.current) {
-      staticElementsRef.current = document.createElement('canvas');
-      staticElementsRef.current.width = canvasRef.current.width;
-      staticElementsRef.current.height = canvasRef.current.height;
-    }
-    
-    // Ottieni il contesto 2D del canvas offscreen
-    const staticCtx = staticElementsRef.current.getContext('2d');
-    
-    // Renderizza lo sfondo
-    staticCtx.fillStyle = '#1a1a1a';
-    staticCtx.fillRect(0, 0, staticElementsRef.current.width, staticElementsRef.current.height);
-    
-    // Renderizza la griglia
-    staticCtx.strokeStyle = '#2a2a2a';
-    staticCtx.lineWidth = 1;
-    
-    // Disegna linee orizzontali
-    for (let y = 0; y < staticElementsRef.current.height; y += gridSizeRef.current) {
-      staticCtx.beginPath();
-      staticCtx.moveTo(0, y);
-      staticCtx.lineTo(staticElementsRef.current.width, y);
-      staticCtx.stroke();
-    }
-    
-    // Disegna linee verticali
-    for (let x = 0; x < staticElementsRef.current.width; x += gridSizeRef.current) {
-      staticCtx.beginPath();
-      staticCtx.moveTo(x, 0);
-      staticCtx.lineTo(x, staticElementsRef.current.height);
-      staticCtx.stroke();
-    }
-    
-    console.log('Elementi statici pre-renderizzati');
-  };
-  
-  // Gestione input da tastiera
+  // Gestione input da tastiera - semplificata
   useEffect(() => {
     if (!gameStarted) return;
     
-    console.log('Attivazione gestione input da tastiera');
+    console.log('Inizializzazione controlli tastiera');
     
-    const handleKeyDown = (e) => {
-      console.log('Tasto premuto:', e.key);
-      
+    const handleKeyPress = (e) => {
       // Previeni lo scroll della pagina con le frecce
-      if(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
       }
       
-      let newDirection = directionRef.current;
+      // Validazione direzione opposta
+      const currentHead = snake[0];
+      const oppositeDirection = {
+        'up': 'down',
+        'down': 'up',
+        'left': 'right',
+        'right': 'left'
+      };
       
-      switch(e.key) {
+      switch (e.key) {
         case 'ArrowUp':
-          if (lastDirectionRef.current !== 'down') {
-            newDirection = 'up';
-            console.log('Direzione cambiata a: up');
+          if (direction !== oppositeDirection['up']) {
+            setDirection('up');
+            console.log('Direzione: up');
           }
           break;
         case 'ArrowDown':
-          if (lastDirectionRef.current !== 'up') {
-            newDirection = 'down';
-            console.log('Direzione cambiata a: down');
+          if (direction !== oppositeDirection['down']) {
+            setDirection('down');
+            console.log('Direzione: down');
           }
           break;
         case 'ArrowLeft':
-          if (lastDirectionRef.current !== 'right') {
-            newDirection = 'left';
-            console.log('Direzione cambiata a: left');
+          if (direction !== oppositeDirection['left']) {
+            setDirection('left');
+            console.log('Direzione: left');
           }
           break;
         case 'ArrowRight':
-          if (lastDirectionRef.current !== 'left') {
-            newDirection = 'right';
-            console.log('Direzione cambiata a: right');
+          if (direction !== oppositeDirection['right']) {
+            setDirection('right');
+            console.log('Direzione: right');
           }
           break;
       }
-      
-      // Aggiorna la direzione immediatamente
-      if (newDirection !== directionRef.current) {
-        console.log(`Nuova direzione: ${newDirection} (da ${directionRef.current})`);
-        directionRef.current = newDirection;
-      }
     };
     
-    // Aggiungi event listener con priorità
-    window.addEventListener('keydown', handleKeyDown, { passive: false });
-    
-    // Forza un input iniziale per far muovere il serpente
-    setTimeout(() => {
-      console.log('Simulazione input iniziale per far muovere il serpente');
-      // Forza la direzione iniziale
-      directionRef.current = 'right';
-      lastDirectionRef.current = 'right';
-    }, 1000);
-    
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [gameStarted]);
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [gameStarted, direction, snake]);
   
-  // Loop di gioco con setInterval (più stabile)
-  useEffect(() => {
-    if (!gameStarted || !playerId || gameLoopActiveRef.current) return;
-
-    console.log('Avvio loop di gioco con setInterval');
-    gameLoopActiveRef.current = true; // Marca il game loop come avviato
-    
-    // SUPER SEMPLICE: muovi il serpente anche se l'altro loop fallisce
-    const emergencyMoveInterval = setInterval(() => {
-      console.log("⚠️ MOVIMENTO DI EMERGENZA");
-      
-      if (!playerState || !playerState.snake || playerState.snake.length === 0) {
-        console.error("ERRORE: non posso muovere il serpente, dati mancanti");
-        return;
-      }
-      
-      const gridSize = gridSizeRef.current;
-      const head = {...playerState.snake[0]};
-      const canvasWidth = 800;
-      const canvasHeight = 600;
-      
-      // Movimento forzato (anche se in altra direzione)
-      console.log("Direzione attuale:", directionRef.current);
-      
-      switch (directionRef.current) {
-        case 'up':
-          head.y -= gridSize;
-          if (head.y < 0) head.y = canvasHeight - gridSize;
-          break;
-        case 'down':
-          head.y += gridSize;
-          if (head.y >= canvasHeight) head.y = 0;
-          break;
-        case 'left':
-          head.x -= gridSize;
-          if (head.x < 0) head.x = canvasWidth - gridSize;
-          break;
-        case 'right':
-          head.x += gridSize;
-          if (head.x >= canvasWidth) head.x = 0;
-          break;
-      }
-      
-      console.log(`🐍 MOVIMENTO: ${directionRef.current}, nuova posizione: (${head.x}, ${head.y})`);
-      
-      // Aggiorna DIRETTAMENTE senza usare setState
-      if (playerState && playerState.snake && playerState.snake.length > 0) {
-        const newSnake = [head, ...playerState.snake.slice(0, -1)];
-        
-        // Aggiorna lo stato 
-        setPlayerState(prevState => {
-          if (!prevState) return prevState;
-          return {
-            ...prevState,
-            snake: newSnake
-          };
-        });
-      }
-    }, 500); // Un movimento ogni 500ms
-    
-    // Movimento automatico per test
-    let autoMoveTimer = null;
-    const startAutoMove = () => {
-      console.log("🤖 Avvio movimento automatico");
-      
-      // Cambia direzione ogni 3 secondi
-      autoMoveTimer = setInterval(() => {
-        // Cambia direzione in sequenza
-        const directions = ['right', 'down', 'left', 'up'];
-        const currentIndex = directions.indexOf(directionRef.current);
-        const nextIndex = (currentIndex + 1) % directions.length;
-        directionRef.current = directions[nextIndex];
-        console.log(`🤖 Cambio direzione automatico: ${directionRef.current}`);
-      }, 3000);
-    };
-    
-    // Avvia movimento automatico dopo 2 secondi
-    const autoMoveTimeout = setTimeout(startAutoMove, 2000);
-    
-    // Riferimenti alle variabili locali che verranno chiuse nel cleanup
-    let gameLoopActive = true;
-    let renderIntervalId = null;
-    
-    // Piccolo ritardo prima di avviare i loop per garantire che lo stato sia aggiornato
-    const startGameLoops = () => {
-      if (!gameLoopActive) return; // Evita avvio se già in pulizia
-      
-      // VERSIONE ULTRA SEMPLIFICATA DEL RENDERING con setInterval invece di requestAnimationFrame
-      renderIntervalId = setInterval(() => {
-        if (!gameLoopActive || !canvasRef.current) return;
-        
-        const ctx = canvasRef.current.getContext('2d');
-        if (!ctx) {
-          console.error('Context non disponibile');
-          return;
-        }
-        
-        // Pulisci il canvas
-        ctx.fillStyle = '#002200';
-        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-        
-        // Disegna una griglia semplice
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-        ctx.lineWidth = 1;
-        const gridSize = gridSizeRef.current;
-        
-        // Disegna griglia orizzontale
-        for (let y = 0; y <= canvasRef.current.height; y += gridSize) {
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(canvasRef.current.width, y);
-          ctx.stroke();
-        }
-        
-        // Disegna griglia verticale
-        for (let x = 0; x <= canvasRef.current.width; x += gridSize) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, canvasRef.current.height);
-          ctx.stroke();
-        }
-        
-        // Disegna il cibo
-        if (foodItems && foodItems.length > 0) {
-          foodItems.forEach(food => {
-            // Disegna un cerchio giallo per il cibo
-            ctx.fillStyle = '#ffff00'; // Giallo brillante
-            ctx.beginPath();
-            ctx.arc(
-              food.x + gridSize/2,
-              food.y + gridSize/2,
-              gridSize/2,
-              0,
-              Math.PI * 2
-            );
-            ctx.fill();
-            
-            // Aggiungi un bordo rosso
-            ctx.strokeStyle = '#ff0000';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(
-              food.x + gridSize/2,
-              food.y + gridSize/2,
-              gridSize/2,
-              0,
-              Math.PI * 2
-            );
-            ctx.stroke();
-          });
-        }
-        
-        // Disegna il serpente locale
-        if (playerState && playerState.snake && playerState.snake.length > 0) {
-          // Disegna il serpente
-          ctx.fillStyle = '#00ff00'; // Verde brillante
-          
-          // Disegna prima il corpo
-          for (let i = playerState.snake.length - 1; i > 0; i--) {
-            const segment = playerState.snake[i];
-            // Disegna segmenti
-            ctx.fillRect(
-              segment.x,
-              segment.y,
-              gridSize - 1,
-              gridSize - 1
-            );
-          }
-          
-          // Disegna la testa con un colore diverso
-          if (playerState.snake.length > 0) {
-            const head = playerState.snake[0];
-            
-            // Contorno bianco più grande per la testa
-            ctx.fillStyle = 'white';
-            ctx.fillRect(
-              head.x - 2,
-              head.y - 2,
-              gridSize + 4,
-              gridSize + 4
-            );
-            
-            // Testa verde
-            ctx.fillStyle = '#00ff00';
-            ctx.fillRect(
-              head.x,
-              head.y,
-              gridSize,
-              gridSize
-            );
-            
-            // Aggiungi occhi
-            ctx.fillStyle = 'black';
-            
-            // Posizione degli occhi basata sulla direzione
-            let eyeX1, eyeY1, eyeX2, eyeY2;
-            
-            switch(directionRef.current) {
-              case 'up':
-                eyeX1 = head.x + gridSize/4;
-                eyeY1 = head.y + gridSize/4;
-                eyeX2 = head.x + 3*gridSize/4;
-                eyeY2 = head.y + gridSize/4;
-                break;
-              case 'down':
-                eyeX1 = head.x + gridSize/4;
-                eyeY1 = head.y + 3*gridSize/4;
-                eyeX2 = head.x + 3*gridSize/4;
-                eyeY2 = head.y + 3*gridSize/4;
-                break;
-              case 'left':
-                eyeX1 = head.x + gridSize/4;
-                eyeY1 = head.y + gridSize/4;
-                eyeX2 = head.x + gridSize/4;
-                eyeY2 = head.y + 3*gridSize/4;
-                break;
-              case 'right':
-              default:
-                eyeX1 = head.x + 3*gridSize/4;
-                eyeY1 = head.y + gridSize/4;
-                eyeX2 = head.x + 3*gridSize/4;
-                eyeY2 = head.y + 3*gridSize/4;
-                break;
-            }
-            
-            // Occhio 1
-            ctx.beginPath();
-            ctx.arc(eyeX1, eyeY1, 3, 0, Math.PI * 2);
-            ctx.fill();
-            
-            // Occhio 2
-            ctx.beginPath();
-            ctx.arc(eyeX2, eyeY2, 3, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-        
-        // INFORMAZIONI DI DEBUG
-        ctx.fillStyle = 'white';
-        ctx.font = '16px Arial';
-        ctx.textAlign = 'left';
-        
-        // Info base
-        ctx.fillText(`Punteggio: ${score}`, 10, 30);
-        ctx.fillText(`Direzione: ${directionRef.current}`, 10, 50);
-        
-        // Info serpente
-        if (playerState && playerState.snake && playerState.snake.length > 0) {
-          const head = playerState.snake[0];
-          ctx.fillText(`Posizione: (${head.x}, ${head.y})`, 10, 70);
-          ctx.fillText(`Lunghezza: ${playerState.snake.length}`, 10, 90);
-        } else {
-          ctx.fillText("Serpente non inizializzato", 10, 70);
-        }
-        
-        // ID sessione e stato connessione
-        ctx.fillText(`ID: ${playerId?.substring(0,8) || 'sconosciuto'}`, 10, canvasRef.current.height - 70);
-        ctx.fillText(`Connessione: ${connectionStatus}`, 10, canvasRef.current.height - 50);
-        
-        // Frame counter per debug
-        frameCountRef.current++;
-        ctx.fillText(`Frame: ${frameCountRef.current}`, 10, canvasRef.current.height - 30);
-      }, 1000/30); // 30 FPS
-    };
-    
-    // Avvia i loops con un piccolo ritardo per evitare sfarfallio
-    const timeoutId = setTimeout(startGameLoops, 500);
-    
-    // Pulizia
-    return () => {
-      console.log('Pulizia game loop...');
-      gameLoopActive = false;
-      gameLoopActiveRef.current = false;
-      
-      // Pulisci timer
-      clearTimeout(timeoutId);
-      clearTimeout(autoMoveTimeout);
-      if (autoMoveTimer) clearInterval(autoMoveTimer);
-      
-      // Pulisci intervalli
-      clearInterval(emergencyMoveInterval);
-      if (renderIntervalId) clearInterval(renderIntervalId);
-    };
-  }, [gameStarted, playerId]);
-  
-  // Assicurarsi che il canvas sia della dimensione corretta per mobile
+  // Logica di movimento basilare - completamente indipendente
   useEffect(() => {
     if (!gameStarted) return;
     
-    const handleResize = () => {
-      if (!canvasRef.current) return;
-      
-      // Ottieni la dimensione del dispositivo
-      const isMobile = window.innerWidth < 768;
-      console.log(`Rilevato dispositivo ${isMobile ? 'mobile' : 'desktop'}, larghezza: ${window.innerWidth}`);
-      
-      const canvas = canvasRef.current;
-      const container = document.getElementById('game-container');
-      
-      if (!container) {
-        console.error('Container non trovato');
-        return;
-      }
-      
-      // Dimensione fissa per il gioco (non cambiare queste)
-      canvas.width = 800;
-      canvas.height = 600;
-      
-      if (isMobile) {
-        // Adattamento per mobile (massimo 100% della larghezza disponibile)
-        const scale = Math.min(1, (window.innerWidth - 40) / canvas.width);
-        canvas.style.width = `${canvas.width * scale}px`;
-        canvas.style.height = `${canvas.height * scale}px`;
-        console.log(`Canvas ridimensionato per mobile, scala: ${scale}`);
-      } else {
-        // Su desktop, mantieni le dimensioni originali
-        canvas.style.width = `${canvas.width}px`;
-        canvas.style.height = `${canvas.height}px`;
-      }
-    };
+    console.log('Avvio gioco - movimento basilare');
     
-    // Esegui al caricamento
-    handleResize();
-    
-    // Aggiungi listener per il ridimensionamento
-    window.addEventListener('resize', handleResize);
-    
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [gameStarted]);
-  
-  // Funzione di comunicazione con il server semplificata 
-  const updateWithServer = async () => {
-    if (!playerState || !gameStarted || !playerId) return;
-    
-    try {
-      // Uso di AbortController per limitare il tempo di attesa della richiesta
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1000); // Timeout più breve
-      
-      // Dati essenziali da inviare
-      const minimizedData = {
-        id: playerId,
-        name: playerName,
-        color: playerColor,
-        score: score,
-        headPos: playerState.snake[0],
-        length: playerState.snake.length,
-        direction: directionRef.current,
-        timestamp: Date.now() // Aggiungi timestamp per debugging
-      };
-      
-      const response = await fetch(`${API_BASE_URL}/api/move`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          playerId,
-          direction: directionRef.current,
-          playerState: minimizedData
-        }),
-        signal: controller.signal
-      }).catch(err => {
-        if (err.name === 'AbortError') {
-          console.log('Richiesta annullata per timeout');
-          return null;
+    // Funzione di movimento
+    const moveSnake = () => {
+      setSnake(prevSnake => {
+        // Clona il serpente attuale
+        const newSnake = [...prevSnake];
+        const head = { ...newSnake[0] };
+        
+        // Calcola la nuova posizione della testa in base alla direzione
+        switch (direction) {
+          case 'up':
+            head.y -= gridSize;
+            break;
+          case 'down':
+            head.y += gridSize;
+            break;
+          case 'left':
+            head.x -= gridSize;
+            break;
+          case 'right':
+            head.x += gridSize;
+            break;
         }
-        throw err;
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response || !response.ok) {
-        return;
-      }
-      
-      const data = await response.json();
-      
-      // Aggiorna il cibo
-      if (data.foodItems) {
-        setFoodItems(data.foodItems);
-      }
-      
-      // Aggiorna gli altri giocatori - adatto per rendering frequente
-      if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-        // Filtro stretto e verifica esplicita che non ci siamo noi stessi
-        const myId = playerId; // Esplicito per evitare problemi di closure
-        const filteredPlayers = data.otherPlayers.filter(p => p && p.id && p.id !== myId);
         
-        // Aggiorna timestamp per ogni giocatore
-        const timestampedPlayers = filteredPlayers.map(player => ({
-          ...player,
-          lastUpdate: Date.now(),
-          // Imposta direzione per il movimento
-          direction: player.direction || 'right'
-        }));
+        // Wraparound - se il serpente esce dal canvas, rientra dall'altro lato
+        if (head.x < 0) head.x = 780;  // 800 - gridSize
+        if (head.x >= 800) head.x = 0;
+        if (head.y < 0) head.y = 580;  // 600 - gridSize
+        if (head.y >= 600) head.y = 0;
         
-        setOtherPlayers(timestampedPlayers);
+        // Inserisci la nuova testa all'inizio dell'array
+        newSnake.unshift(head);
         
-        // IMPORTANTE: Aggiorna anche il sistema di players per l'interpolazione
-        const updatedPlayers = {};
-        timestampedPlayers.forEach(player => {
-          updatedPlayers[player.id] = player;
-        });
-        setPlayers(updatedPlayers);
-        
-        // Debug log, solo occasionalmente
-        if (debugMode && Math.random() < 0.05) {
-          console.log(`Server: ${data.otherPlayers.length} giocatori, dopo filtro: ${filteredPlayers.length}`);
-        }
-      }
-    } catch (error) {
-      console.error('Errore comunicazione server:', error);
-    }
-  };
-  
-  // Inizializza Pusher - configurazione ottimizzata
-  useEffect(() => {
-    if (!gameStarted || !playerId) return;
-    
-    console.log("Inizializzazione Pusher con ID:", playerId);
-    
-    // Preveniamo reinizializzazioni inutili
-    if (pusherRef.current) {
-      console.log("Pusher già inizializzato, salto reinizializzazione");
-      return;
-    }
-    
-    let pusherInstance = null;
-    let channelInstance = null;
-    let isCleaningUp = false;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 5;
-    
-    const initializePusher = () => {
-      try {
-        // Resetta lo stato degli other players se è una nuova connessione, non una riconnessione
-        if (reconnectAttempts === 0) {
-          setOtherPlayers([]);
-        }
-        setConnectionStatus('connessione...');
-        
-        console.log('Inizializzazione connessione Pusher (tentativo ' + (reconnectAttempts + 1) + ')');
-        
-        // Inizializza Pusher con opzioni ottimizzate
-        pusherInstance = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-          cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
-          enabledTransports: ['ws', 'wss'], // Preferisci WebSocket
-          disableStats: true, // Disabilita statistiche per ridurre traffico
-          pongTimeout: 10000, // Aumenta timeout
-          activityTimeout: 30000, // Aumenta timeout attività
-        });
-        
-        // Memorizza il riferimento a Pusher subito per evitare doppia inizializzazione
-        pusherRef.current = pusherInstance;
-        
-        // Sottoscrivi al canale
-        channelInstance = pusherInstance.subscribe('snake-game');
-        
-        // Log dello stato della connessione
-        pusherInstance.connection.bind('state_change', (states) => {
-          if (isCleaningUp) return; // Ignora eventi durante pulizia
-          
-          console.log('Stato connessione Pusher:', states.current);
-          setConnectionStatus(states.current);
-          
-          // Se la connessione è stata stabilita, aggiorna il timestamp e resetta i tentativi
-          if (states.current === 'connected') {
-            setLastMessageTime(Date.now());
-            lastSocketMessageTimeRef.current = Date.now();
-            reconnectAttempts = 0; // Reset dei tentativi quando connesso con successo
+        // Controlla collisione con il cibo
+        let ate = false;
+        food.forEach((foodItem, index) => {
+          if (head.x === foodItem.x && head.y === foodItem.y) {
+            ate = true;
             
-            // Forza un aggiornamento immediato per recuperare lo stato attuale
-            updateWithServer();
-          } else if (states.current === 'disconnected' || states.current === 'failed') {
-            // Tentativo di riconnessione dopo un breve ritardo, con backoff esponenziale
-            const reconnectDelay = Math.min(3000 * Math.pow(1.5, reconnectAttempts), 15000);
+            // Aumenta il punteggio
+            setScore(prevScore => prevScore + 10);
             
-            console.log(`Tentativo di riconnessione ${reconnectAttempts + 1}/${maxReconnectAttempts} tra ${reconnectDelay/1000}s...`);
-            
-            if (reconnectAttempts < maxReconnectAttempts) {
-              setTimeout(() => {
-                if (!isCleaningUp) {
-                  reconnectAttempts++;
-                  
-                  // Disconnetti completamente prima di riconnetterti
-                  if (pusherInstance) {
-                    try {
-                      if (channelInstance) {
-                        pusherInstance.unsubscribe('snake-game');
-                      }
-                      pusherInstance.disconnect();
-                    } catch (error) {
-                      console.error('Errore durante reset connessione:', error);
-                    }
-                  }
-                  
-                  // Inizializza una nuova connessione
-                  initializePusher();
-                }
-              }, reconnectDelay);
-            } else {
-              console.error('Numero massimo di tentativi di riconnessione raggiunto');
-              setConnectionStatus('errore');
-              setError('Impossibile connettersi al server dopo multipli tentativi. Ricarica la pagina.');
-            }
-          }
-        });
-        
-        // Gestisci l'errore di connessione
-        pusherInstance.connection.bind('error', (err) => {
-          if (isCleaningUp) return;
-          console.error('Errore connessione Pusher:', err);
-          setConnectionStatus('errore');
-        });
-        
-        // Gestisci l'evento player-joined
-        channelInstance.bind('player-joined', (data) => {
-          if (isCleaningUp || !data) return;
-          setLastMessageTime(Date.now());
-          lastSocketMessageTimeRef.current = Date.now();
-          
-          console.log('Ricevuto evento player-joined:', 
-            data.player ? data.player.id : 'nessun player',
-            'Altri giocatori:', data.otherPlayers ? data.otherPlayers.length : 0);
-          
-          // Aggiorna il cibo
-          if (data.foodItems) {
-            setFoodItems(data.foodItems);
-          }
-          
-          // Aggiorna i giocatori - verifica esplicitamente che non siamo noi
-          if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-            const filtered = data.otherPlayers.filter(p => p && p.id && p.id !== playerId);
-            console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
-            
-            // Aggiorna timestamp per ogni giocatore
-            const timestampedPlayers = filtered.map(player => ({
-              ...player,
-              lastUpdate: Date.now(),
-              // Imposta direzione per il movimento
-              direction: player.direction || 'right'
-            }));
-            
-            // Aggiorna entrambi gli stati per garantire coerenza
-            setOtherPlayers(timestampedPlayers);
-            
-            // IMPORTANTE: Aggiorna anche il sistema di players per l'interpolazione
-            const updatedPlayers = {};
-            timestampedPlayers.forEach(player => {
-              updatedPlayers[player.id] = player;
-            });
-            setPlayers(updatedPlayers);
-          }
-          
-          // Aggiorna anche quando un singolo giocatore si unisce
-          if (data.player && data.player.id !== playerId) {
-            console.log('Nuovo giocatore unito:', data.player.id, data.player.name);
-            setOtherPlayers(prev => {
-              const newPlayer = {
-                ...data.player,
-                lastUpdate: Date.now(),
-                direction: data.player.direction || 'right'
+            // Genera nuovo cibo in posizione casuale
+            setFood(prevFood => {
+              const newFood = [...prevFood];
+              newFood[index] = {
+                x: Math.floor(Math.random() * (800 / gridSize)) * gridSize,
+                y: Math.floor(Math.random() * (600 / gridSize)) * gridSize
               };
-              return [...prev.filter(p => p.id !== data.player.id), newPlayer];
-            });
-            
-            // Aggiorna anche il sistema di players
-            setPlayers(prev => {
-              const newPlayers = {...prev};
-              newPlayers[data.player.id] = {
-                ...data.player,
-                lastUpdate: Date.now(),
-                direction: data.player.direction || 'right'
-              };
-              return newPlayers;
+              return newFood;
             });
           }
         });
         
-        // Gestisci l'evento player-moved
-        channelInstance.bind('player-moved', (data) => {
-          if (isCleaningUp || !data) return;
-          setLastMessageTime(Date.now());
-          lastSocketMessageTimeRef.current = Date.now();
-          
-          // Log meno frequente per non intasare la console
-          if (debugMode && Math.random() < 0.1) {
-            console.log('Ricevuto evento player-moved:', 
-              data.playerId,
-              'Altri giocatori:', data.otherPlayers ? data.otherPlayers.length : 0);
-          }
-          
-          // Aggiorna il cibo
-          if (data.foodItems) {
-            setFoodItems(data.foodItems);
-          }
-          
-          // Aggiorna giocatori - con controllo più stretto
-          if (data.otherPlayers && Array.isArray(data.otherPlayers)) {
-            const myId = playerId;
-            const filtered = data.otherPlayers.filter(p => p && p.id && p.id !== myId);
-            
-            // Aggiorna timestamp per ogni giocatore
-            const timestampedPlayers = filtered.map(player => ({
-              ...player,
-              lastUpdate: Date.now(),
-              // Imposta direzione per il movimento
-              direction: player.direction || 'right'
-            }));
-            
-            // Aggiorna entrambi gli stati per garantire coerenza
-            setOtherPlayers(timestampedPlayers);
-            
-            // IMPORTANTE: Aggiorna anche il sistema di players per l'interpolazione
-            const updatedPlayers = {};
-            timestampedPlayers.forEach(player => {
-              updatedPlayers[player.id] = player;
-            });
-            setPlayers(updatedPlayers);
-            
-            // Solo in debug mode
-            if (debugMode && Math.random() < 0.05) {
-              console.log(`Filtrato ${data.otherPlayers.length} giocatori a ${filtered.length}`);
-              if (filtered.length > 0) {
-                console.log('Esempio serpente:', filtered[0].snake ? 
-                  `${filtered[0].snake.length} segmenti` : 'nessun serpente');
-              }
-            }
-          }
-        });
-      } catch (error) {
-        console.error('Errore inizializzazione Pusher:', error);
-        setError('Errore di connessione: ricarica la pagina');
-        setConnectionStatus('errore');
-      }
+        // Se non ha mangiato, rimuovi l'ultimo segmento del serpente
+        if (!ate) {
+          newSnake.pop();
+        }
+        
+        // Log della nuova posizione (solo per il debug)
+        console.log(`Movimento: ${direction}, Testa: (${head.x}, ${head.y}), Lunghezza: ${newSnake.length}`);
+        
+        return newSnake;
+      });
     };
     
-    // Ping/pong per verificare stato connessione
-    const pingInterval = setInterval(() => {
-      if (isCleaningUp) return;
-      
-      // Invia un piccolo ping al server per mantenere viva la connessione
-      fetch(`${API_BASE_URL}/api/ping`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ playerId })
-      }).catch(err => console.log('Errore ping:', err));
-      
-      // Verifica quanto tempo è passato dall'ultimo messaggio
-      if (lastMessageTime) {
-        const now = Date.now();
-        const elapsed = now - lastMessageTime;
-        if (elapsed > 15000) { // 15 secondi senza messaggi
-          setConnectionStatus('inattivo');
-          
-          // Tenta di riconnettere se la connessione è inattiva
-          if (pusherInstance && pusherInstance.connection.state !== 'connected') {
-            console.log('Tentativo di riconnessione per inattività...');
-            pusherInstance.connect();
-          }
-        }
-      }
-    }, 5000);
+    // Imposta un intervallo per il movimento
+    const gameInterval = setInterval(moveSnake, 200); // 5 movimenti al secondo
+    gameLoopRef.current = gameInterval;
     
-    // Avvia l'inizializzazione
-    initializePusher();
-    
-    // Disconnetti al termine
     return () => {
-      console.log('Pulizia componente con gameStarted=' + gameStarted + ' e playerId=' + playerId);
-      isCleaningUp = true;
-      console.log('Pulizia connessione Pusher...');
-      clearInterval(pingInterval);
-      
-      // Disiscriviti dal canale prima di disconnettere
-      if (channelInstance) {
-        try {
-          console.log('Disiscrivendo dal canale...');
-          channelInstance.unbind_all();
-          pusherInstance.unsubscribe('snake-game');
-        } catch (error) {
-          console.error('Errore durante disiscrivimento:', error);
-        }
+      // Pulisci l'intervallo quando il componente viene smontato
+      if (gameLoopRef.current) {
+        clearInterval(gameLoopRef.current);
       }
-      
-      // Disconnetti Pusher dopo un breve ritardo per permettere al canale di disiscriversi
-      setTimeout(() => {
-        if (pusherInstance) {
-          try {
-            console.log('Disconnessione Pusher...');
-            pusherInstance.disconnect();
-            pusherInstance = null;
-            channelInstance = null;
-            // Importante: reimposta il riferimento a null per consentire future reinizializzazioni
-            pusherRef.current = null;
-          } catch (error) {
-            console.error('Errore durante disconnessione Pusher:', error);
-          }
-        }
-        setConnectionStatus('disconnesso');
-      }, 300);
     };
-  }, [gameStarted, playerId]); // Rimuoviamo le dipendenze che potrebbero causare reinizializzazioni
+  }, [gameStarted, direction, food]);
   
-  // Nuovo effetto per pulire i giocatori inattivi
+  // Rendering basilare - completamente indipendente
   useEffect(() => {
-    if (!gameStarted) return;
-    
-    // Controlla e rimuovi i giocatori inattivi ogni 10 secondi
-    const cleanupInterval = setInterval(() => {
-      setOtherPlayers(prev => {
-        const now = Date.now();
-        // Rimuovi giocatori che non hanno inviato aggiornamenti negli ultimi 15 secondi
-        return prev.filter(player => {
-          return player && player.lastUpdate && (now - player.lastUpdate) < 15000;
-        });
-      });
-    }, 10000);
-    
-    return () => {
-      clearInterval(cleanupInterval);
-    };
-  }, [gameStarted]);
-  
-  // Gestione joystick per mobile
-  useEffect(() => {
-    if (!gameStarted || !isMobile) return;
-    
-    // Gestione swipe
-    let startX = 0;
-    let startY = 0;
-    
-    const handleTouchStart = (e) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-    };
-    
-    const handleTouchMove = (e) => {
-      if (!startX || !startY) return;
-      
-      const diffX = e.touches[0].clientX - startX;
-      const diffY = e.touches[0].clientY - startY;
-      
-      // Determina la direzione del movimento
-      if (Math.abs(diffX) > Math.abs(diffY)) {
-        // Movimento orizzontale
-        if (diffX > 0 && lastDirectionRef.current !== 'left') {
-          directionRef.current = 'right';
-        } else if (diffX < 0 && lastDirectionRef.current !== 'right') {
-          directionRef.current = 'left';
-        }
-      } else {
-        // Movimento verticale
-        if (diffY > 0 && lastDirectionRef.current !== 'up') {
-          directionRef.current = 'down';
-        } else if (diffY < 0 && lastDirectionRef.current !== 'down') {
-          directionRef.current = 'up';
-        }
-      }
-      
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-    };
-    
-    const handleTouchEnd = () => {
-      startX = 0;
-      startY = 0;
-    };
-    
-    // Setup joystick
-    const setupJoystick = () => {
-      if (!joystickRef.current) return;
-      
-      const joystickElement = joystickRef.current;
-      const joystickBounds = joystickElement.getBoundingClientRect();
-      const joystickCenterX = joystickBounds.width / 2;
-      const joystickCenterY = joystickBounds.height / 2;
-      
-      let isDragging = false;
-      let stick = joystickElement.querySelector('.joystick-stick');
-      
-      // Tocco iniziale
-      joystickElement.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        isDragging = true;
-        updateJoystickPosition(e);
-      });
-      
-      // Movimento del joystick
-      joystickElement.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        if (isDragging) {
-          updateJoystickPosition(e);
-        }
-      });
-      
-      // Fine del tocco
-      joystickElement.addEventListener('touchend', () => {
-        isDragging = false;
-        // Riporta il joystick al centro
-        stick.style.transform = `translate(0px, 0px)`;
-      });
-      
-      // Aggiorna la posizione del joystick e la direzione
-      function updateJoystickPosition(e) {
-        const touch = e.touches[0];
-        const rect = joystickElement.getBoundingClientRect();
-        
-        // Calcola la posizione relativa al centro del joystick
-        let x = touch.clientX - rect.left - joystickCenterX;
-        let y = touch.clientY - rect.top - joystickCenterY;
-        
-        // Limita il movimento entro il cerchio del joystick
-        const distance = Math.sqrt(x * x + y * y);
-        const maxDistance = joystickCenterX - 10; // Raggio massimo
-        
-        if (distance > maxDistance) {
-          x = (x / distance) * maxDistance;
-          y = (y / distance) * maxDistance;
-        }
-        
-        // Muovi visivamente il joystick
-        stick.style.transform = `translate(${x}px, ${y}px)`;
-        
-        // Determina la direzione in base all'angolo
-        const angle = Math.atan2(y, x) * (180 / Math.PI);
-        
-        // Converti l'angolo nella direzione appropriata
-        if (angle > -45 && angle <= 45 && lastDirectionRef.current !== 'left') {
-          directionRef.current = 'right';
-        } else if (angle > 45 && angle <= 135 && lastDirectionRef.current !== 'up') {
-          directionRef.current = 'down';
-        } else if ((angle > 135 || angle <= -135) && lastDirectionRef.current !== 'right') {
-          directionRef.current = 'left';
-        } else if (angle > -135 && angle <= -45 && lastDirectionRef.current !== 'down') {
-          directionRef.current = 'up';
-        }
-      }
-    };
-    
-    // Aggiungi eventi per swipe
-    document.addEventListener('touchstart', handleTouchStart, { passive: false });
-    document.addEventListener('touchmove', handleTouchMove, { passive: false });
-    document.addEventListener('touchend', handleTouchEnd, { passive: false });
-    
-    // Setup joystick con leggero ritardo
-    setTimeout(setupJoystick, 500);
-    
-    return () => {
-      document.removeEventListener('touchstart', handleTouchStart);
-      document.removeEventListener('touchmove', handleTouchMove);
-      document.removeEventListener('touchend', handleTouchEnd);
-    };
-  }, [gameStarted, isMobile]);
-  
-  // Funzione per aggiustare la dimensione del canvas
-  const resizeCanvas = () => {
-    if (!canvasRef.current) return;
+    if (!gameStarted || !canvasRef.current) return;
     
     const canvas = canvasRef.current;
-    console.log('RESIZE: Regolando le dimensioni del canvas');
+    const ctx = canvas.getContext('2d');
     
-    // Dimensioni logiche del gioco
-    const logicalWidth = 800;
-    const logicalHeight = 600;
+    const draw = () => {
+      // Pulisci il canvas
+      ctx.fillStyle = '#121212';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Disegna la griglia (molto leggera)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.lineWidth = 0.5;
+      
+      // Griglia orizzontale
+      for (let y = 0; y <= canvas.height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+      
+      // Griglia verticale
+      for (let x = 0; x <= canvas.width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      
+      // Disegna il serpente
+      snake.forEach((segment, index) => {
+        // La testa è di colore diverso
+        if (index === 0) {
+          ctx.fillStyle = '#FFFFFF'; // Bianco per il contorno
+          ctx.fillRect(segment.x - 2, segment.y - 2, gridSize + 4, gridSize + 4);
+          ctx.fillStyle = playerColor; // Colore scelto dal giocatore
+        } else {
+          ctx.fillStyle = darkenColor(playerColor, index * 5); // Ogni segmento è più scuro
+        }
+        
+        ctx.fillRect(segment.x, segment.y, gridSize - 1, gridSize - 1);
+        
+        // Disegna gli occhi sulla testa
+        if (index === 0) {
+          ctx.fillStyle = '#000000';
+          
+          // Posiziona gli occhi in base alla direzione
+          let eyeX1, eyeY1, eyeX2, eyeY2;
+          
+          switch (direction) {
+            case 'up':
+              eyeX1 = segment.x + gridSize * 0.25;
+              eyeY1 = segment.y + gridSize * 0.25;
+              eyeX2 = segment.x + gridSize * 0.75;
+              eyeY2 = segment.y + gridSize * 0.25;
+              break;
+            case 'down':
+              eyeX1 = segment.x + gridSize * 0.25;
+              eyeY1 = segment.y + gridSize * 0.75;
+              eyeX2 = segment.x + gridSize * 0.75;
+              eyeY2 = segment.y + gridSize * 0.75;
+              break;
+            case 'left':
+              eyeX1 = segment.x + gridSize * 0.25;
+              eyeY1 = segment.y + gridSize * 0.25;
+              eyeX2 = segment.x + gridSize * 0.25;
+              eyeY2 = segment.y + gridSize * 0.75;
+              break;
+            case 'right':
+              eyeX1 = segment.x + gridSize * 0.75;
+              eyeY1 = segment.y + gridSize * 0.25;
+              eyeX2 = segment.x + gridSize * 0.75;
+              eyeY2 = segment.y + gridSize * 0.75;
+              break;
+          }
+          
+          ctx.beginPath();
+          ctx.arc(eyeX1, eyeY1, 3, 0, Math.PI * 2);
+          ctx.arc(eyeX2, eyeY2, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+      
+      // Disegna il cibo
+      ctx.fillStyle = '#FF6347'; // Rosso per il cibo
+      food.forEach(foodItem => {
+        ctx.beginPath();
+        ctx.arc(
+          foodItem.x + gridSize / 2,
+          foodItem.y + gridSize / 2,
+          gridSize / 2,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+        
+        // Aggiungi un piccolo riflesso per effetto 3D
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(
+          foodItem.x + gridSize / 3,
+          foodItem.y + gridSize / 3,
+          gridSize / 6,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+        
+        ctx.fillStyle = '#FF6347';
+      });
+      
+      // Disegna il punteggio
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 20px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Punteggio: ${score}`, 20, 30);
+      
+      // Disegna direzione attuale (per debug)
+      ctx.textAlign = 'right';
+      ctx.fillText(`Direzione: ${direction}`, canvas.width - 20, 30);
+      
+      // Richiedi il prossimo frame
+      requestAnimationFrame(draw);
+    };
     
-    // Ottieni le dimensioni del container
-    const container = document.getElementById('game-container');
-    if (!container) {
-      console.error('ERRORE: Container del gioco non trovato!');
+    // Avvia il loop di disegno
+    const animationId = requestAnimationFrame(draw);
+    
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [gameStarted, snake, food, direction, score, playerColor]);
+  
+  // Funzione per avviare una nuova partita
+  const handleStartGame = (e) => {
+    e.preventDefault();
+    
+    if (!playerName) {
+      setError('Inserisci il tuo nome');
       return;
     }
     
-    // Imposta dimensioni fisiche del canvas (NON MODIFICARE QUESTE)
-    canvas.width = logicalWidth;
-    canvas.height = logicalHeight;
-    
-    console.log(`Canvas dimensioni fisiche impostate a ${canvas.width}x${canvas.height}`);
-    
-    // IMPORTANTE: Non ridimensionare il canvas con CSS, ma usalo a dimensione piena
-    canvas.style.width = `${canvas.width}px`;
-    canvas.style.height = `${canvas.height}px`;
-    
-    // Memorizza la scala per il rendering
-    setScale(1.0);
-    
-    console.log(`Canvas dimensioni CSS impostate a ${canvas.style.width}x${canvas.style.height}`);
-    
-    // Forza un render immediato con un serpente di test
-    setTimeout(() => {
-      if (canvasRef.current) {
-        const ctx = canvasRef.current.getContext('2d');
-        if (ctx) {
-          // Pulisci canvas
-          ctx.fillStyle = '#004400';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Disegna serpente di test
-          ctx.fillStyle = '#ff00ff'; // Fucsia per alta visibilità
-          
-          const gridSize = gridSizeRef.current;
-          
-          // Disegna un grande serpente di test
-          for (let i = 0; i < 5; i++) {
-            ctx.fillRect(
-              200 + i * gridSize, 
-              200, 
-              gridSize - 1, 
-              gridSize - 1
-            );
-          }
-          
-          // Disegna un cibo di test
-          ctx.fillStyle = '#ffff00'; // Giallo brillante
-          ctx.beginPath();
-          ctx.arc(
-            400,
-            300,
-            gridSize,
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-          
-          console.log('TEST RENDER: Disegnato serpente e cibo di test');
-        }
-      }
-    }, 100);
-  };
-  
-  // Ridimensiona il canvas quando la finestra cambia dimensione
-  useEffect(() => {
-    if (!gameStarted) return;
-    
-    window.addEventListener('resize', resizeCanvas);
-    // Imposta le dimensioni iniziali
-    resizeCanvas();
-    
-    return () => {
-      window.removeEventListener('resize', resizeCanvas);
-    };
-  }, [gameStarted]);
-  
-  // Inizializzazione della partita
-  const handleStartGame = async (e) => {
-    e.preventDefault();
-    
-    try {
-      console.log('Avvio partita...');
-      
-      // Mostra un indicatore di caricamento
-      setError('Caricamento in corso...');
-      
-      const res = await fetch(`${API_BASE_URL}/api/join`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          playerName: playerName,
-          playerColor: playerColor
-        }),
-      });
-      
-      if (!res.ok) {
-        throw new Error(`Errore API: ${res.status}`);
-      }
-      
-      const data = await res.json();
-      console.log('Dati ricevuti dal server:', data);
-      console.log('Player:', data.player);
-      console.log('Snake:', data.player.snake);
-      console.log('Food items:', data.foodItems);
-      
-      if (!data.player || !data.player.snake || !data.player.snake.length) {
-        throw new Error('Dati del serpente mancanti o non validi');
-      }
-      
-      // Fix eventuali coordinate non valide nel serpente
-      if (data.player && data.player.snake) {
-        data.player.snake = data.player.snake.map(segment => {
-          // Assicurati che le coordinate siano numeri e non stringhe
-          return {
-            x: parseInt(segment.x, 10),
-            y: parseInt(segment.y, 10)
-          };
-        });
-        console.log('Serpente con coordinate corrette:', data.player.snake);
-      }
-      
-      // Fix eventuali coordinate non valide nel cibo
-      if (data.foodItems) {
-        data.foodItems = data.foodItems.map(food => {
-          // Assicurati che le coordinate siano numeri e non stringhe
-          return {
-            x: parseInt(food.x, 10),
-            y: parseInt(food.y, 10)
-          };
-        });
-        console.log('Cibo con coordinate corrette:', data.foodItems);
-      }
-      
-      // Prepara il canvas prima di impostare i dati
-      if (canvasRef.current) {
-        const canvas = canvasRef.current;
-        
-        // Imposta dimensioni fisiche del canvas
-        canvas.width = 800;
-        canvas.height = 600;
-        
-        // Pre-rendering del primo frame per evitare sfarfallio
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#121212';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Disegna griglia
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-        ctx.lineWidth = 0.5;
-        const gridSize = gridSizeRef.current;
-        
-        // Disegna linee verticali
-        for (let x = 0; x <= canvas.width; x += gridSize) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, canvas.height);
-          ctx.stroke();
-        }
-        
-        // Disegna linee orizzontali (corretto)
-        for (let y = 0; y <= canvas.height; y += gridSize) {
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(canvas.width, y); // Corretto: linea da sinistra a destra
-          ctx.stroke();
-        }
-      }
-      
-      // Imposta i dati iniziali dopo aver preparato il canvas
-      // Crea un serpente di base se i dati dal server sono insufficienti
-      const defaultSnake = [
-        { x: 100, y: 100 },
-        { x: 80, y: 100 },
-        { x: 60, y: 100 },
-      ];
-      
-      setPlayerId(data.player.id);
-      setPlayerState({
-        ...data.player,
-        snake: data.player.snake && data.player.snake.length > 0 ? data.player.snake : defaultSnake
-      });
-      setFoodItems(data.foodItems && data.foodItems.length > 0 ? data.foodItems : [{ x: 300, y: 300 }]);
-      setScore(data.player.score || 0);
-      setOtherPlayers(data.otherPlayers || []);
-      
-      // Breve ritardo prima di avviare il gioco per garantire che tutto sia pronto
-      setTimeout(() => {
-        // Prepara il canvas dopo aver impostato i dati ma prima di mostrare l'interfaccia
-        if (canvasRef.current) {
-          const canvas = canvasRef.current;
-          const ctx = canvas.getContext('2d');
-          
-          // Disegno debug del serpente iniziale per verifica
-          const gridSize = gridSizeRef.current;
-          
-          // TEST: log per verificare lo stato dello snake
-          console.log('INIT: Stato del serpente prima del render:', playerState?.snake);
-          
-          // Disegna il serpente con colore luminoso e bordo bianco per renderlo più visibile
-          const snakeToRender = data.player && data.player.snake && data.player.snake.length > 0 
-            ? data.player.snake 
-            : defaultSnake;
-            
-          console.log('INIT: Serpente da renderizzare:', snakeToRender);
-          
-          snakeToRender.forEach((segment, i) => {
-            if (!segment) return;
-            
-            console.log(`INIT: Rendering segmento ${i} a (${segment.x}, ${segment.y})`);
-            
-            // Disegna un cerchio più grande per rendere più visibile il serpente
-            // Bordo bianco
-            ctx.fillStyle = 'white';
-            ctx.beginPath();
-            ctx.arc(
-              segment.x + gridSize/2,
-              segment.y + gridSize/2,
-              i === 0 ? gridSize/2 + 2 : gridSize/2,
-              0,
-              Math.PI * 2
-            );
-            ctx.fill();
-            
-            // Cerchio interno colorato
-            ctx.fillStyle = playerColor;
-            ctx.beginPath();
-            ctx.arc(
-              segment.x + gridSize/2,
-              segment.y + gridSize/2,
-              i === 0 ? gridSize/2 : gridSize/2 - 2,
-              0,
-              Math.PI * 2
-            );
-            ctx.fill();
-            
-            // Punto di debug per la testa
-            if (i === 0) {
-              ctx.fillStyle = 'white';
-              ctx.beginPath();
-              ctx.arc(
-                segment.x + gridSize/2,
-                segment.y + gridSize/2,
-                3,
-                0,
-                Math.PI * 2
-              );
-              ctx.fill();
-            }
-          });
-          
-          // Disegna il cibo
-          const foodToRender = data.foodItems && data.foodItems.length > 0 
-            ? data.foodItems 
-            : [{ x: 300, y: 300 }];
-            
-          console.log('INIT: Cibo da renderizzare:', foodToRender);
-            
-          foodToRender.forEach(food => {
-            if (!food) return;
-            
-            console.log(`INIT: Rendering cibo a (${food.x}, ${food.y})`);
-            
-            ctx.fillStyle = '#e73c3e';
-            ctx.beginPath();
-            ctx.arc(
-              food.x + gridSize/2,
-              food.y + gridSize/2,
-              gridSize/2 - 2,
-              0,
-              Math.PI * 2
-            );
-            ctx.fill();
-          });
-          
-          // Disegna stats iniziali
-          ctx.fillStyle = 'white';
-          ctx.font = 'bold 16px Arial';
-          ctx.textAlign = 'left';
-          ctx.fillText(`Punteggio: ${data.player.score || 0}`, 10, 25);
-          
-          ctx.textAlign = 'right';
-          ctx.fillText(`Giocatori: ${(data.otherPlayers?.length || 0) + 1}`, canvas.width - 10, 25);
-        }
-        
-        // Impostiamo anche la direzione iniziale
-        directionRef.current = 'right';
-        lastDirectionRef.current = 'right';
-        
-        // Ridimensiona il canvas per adattarlo al container
-        resizeCanvas();
-        
-        setError('');
-        setGameStarted(true);
-        
-        console.log('Interfaccia di gioco attivata!');
-      }, 500); // Aumento ulteriormente il ritardo per garantire che il canvas sia pronto
-      
-      console.log('Gioco avviato con successo, ID:', data.player.id);
-    } catch (err) {
-      console.error('Errore avvio gioco:', err);
-      setError('Errore durante l\'avvio del gioco: ' + err.message);
-    }
-  };
-  
-  // Renderizza informazioni di debug nel canvas
-  const renderDebugInfo = (bufferCtx, canvas, otherPlayers, visiblePlayers) => {
-    if (!debugMode) return;
-    
-    const now = Date.now();
-    const lastMessageTimeVal = lastMessageTime || now;
-    const connectionAge = Math.floor((now - lastMessageTimeVal) / 1000);
-    
-    bufferCtx.fillStyle = connectionStatus === 'connected' ? '#00ff00' : 
-                         (connectionStatus === 'connecting' ? '#ffff00' : '#ff0000');
-    bufferCtx.font = '12px monospace';
-    bufferCtx.textAlign = 'left';
-    bufferCtx.fillText(`Connessione: ${connectionStatus} (${connectionAge}s)`, 10, 65);
-    bufferCtx.fillText(`ID: ${playerId?.substring(0,8) || 'N/A'}`, 10, 80);
-    bufferCtx.fillText(`Altri: ${otherPlayers?.length || 0} (visibili: ${visiblePlayers})`, 10, 95);
-    
-    // Visualizza le coordinate di alcuni giocatori per debug
-    if (otherPlayers && otherPlayers.length > 0) {
-      otherPlayers.slice(0, 2).forEach((player, idx) => {
-        if (player && player.snake && player.snake.length > 0) {
-          const head = player.snake[0];
-          bufferCtx.fillText(
-            `P${idx+1}: (${head.x},${head.y})`, 
-            10, 110 + idx * 15
-          );
-        }
-      });
-    }
-  };
-  
-  // Funzione per calcolare le aree da aggiornare
-  const getAreasToUpdate = () => {
-    const areas = [];
-    const margin = gridSizeRef.current * 2; // Aggiungiamo un margine per sicurezza
-    
-    // Area attorno al serpente locale
-    if (snakeRef.current && snakeRef.current.length > 0) {
-      // Consideriamo solo testa e coda per ridurre le aree da aggiornare
-      const head = snakeRef.current[0];
-      const tail = snakeRef.current[snakeRef.current.length - 1];
-      
-      // Area per la testa
-      areas.push({
-        x: head.x - margin,
-        y: head.y - margin,
-        width: gridSizeRef.current + margin * 2,
-        height: gridSizeRef.current + margin * 2
-      });
-      
-      // Area per la coda
-      areas.push({
-        x: tail.x - margin,
-        y: tail.y - margin,
-        width: gridSizeRef.current + margin * 2,
-        height: gridSizeRef.current + margin * 2
-      });
+    // Imposta le dimensioni del canvas
+    if (canvasRef.current) {
+      canvasRef.current.width = 800;
+      canvasRef.current.height = 600;
     }
     
-    // Aree attorno ai serpenti remoti - con priorità basata sulla distanza
-    Object.values(interpolatedPlayers).forEach(player => {
-      if (!player.snake || player.snake.length === 0) return;
-      
-      // Consideriamo solo testa e coda per ridurre le aree da aggiornare
-      const head = player.snake[0];
-      const tail = player.snake[player.snake.length - 1];
-      
-      // Area per la testa
-      areas.push({
-        x: head.x - margin,
-        y: head.y - margin,
-        width: gridSizeRef.current + margin * 2,
-        height: gridSizeRef.current + margin * 2
-      });
-      
-      // Area per la coda
-      areas.push({
-        x: tail.x - margin,
-        y: tail.y - margin,
-        width: gridSizeRef.current + margin * 2,
-        height: gridSizeRef.current + margin * 2
-      });
-    });
+    // Genera cibo in posizione casuale
+    setFood([{
+      x: Math.floor(Math.random() * (800 / gridSize)) * gridSize,
+      y: Math.floor(Math.random() * (600 / gridSize)) * gridSize
+    }]);
     
-    // Aree attorno al cibo
-    if (foodItems && foodItems.length > 0) {
-      foodItems.forEach(food => {
-        areas.push({
-          x: food.x - margin / 2,
-          y: food.y - margin / 2,
-          width: gridSizeRef.current + margin,
-          height: gridSizeRef.current + margin
-        });
-      });
-    }
+    // Reimposta il serpente nella posizione iniziale
+    setSnake([
+      { x: 100, y: 100 },
+      { x: 80, y: 100 },
+      { x: 60, y: 100 }
+    ]);
     
-    // Ottimizza le aree combinando quelle che si sovrappongono
-    const optimizedAreas = [];
-    areas.forEach(area => {
-      let merged = false;
-      
-      // Verifica se l'area può essere unita con un'area già esistente
-      for (let i = 0; i < optimizedAreas.length; i++) {
-        const existingArea = optimizedAreas[i];
-        
-        // Calcola l'area di intersezione
-        const x1 = Math.max(area.x, existingArea.x);
-        const y1 = Math.max(area.y, existingArea.y);
-        const x2 = Math.min(area.x + area.width, existingArea.x + existingArea.width);
-        const y2 = Math.min(area.y + area.height, existingArea.y + existingArea.height);
-        
-        // Se c'è intersezione, unisci le aree
-        if (x1 < x2 && y1 < y2) {
-          // Calcola le nuove coordinate dell'area unita
-          const newX = Math.min(area.x, existingArea.x);
-          const newY = Math.min(area.y, existingArea.y);
-          const newWidth = Math.max(area.x + area.width, existingArea.x + existingArea.width) - newX;
-          const newHeight = Math.max(area.y + area.height, existingArea.y + existingArea.height) - newY;
-          
-          // Aggiorna l'area esistente
-          existingArea.x = newX;
-          existingArea.y = newY;
-          existingArea.width = newWidth;
-          existingArea.height = newHeight;
-          
-          merged = true;
-          break;
-        }
-      }
-      
-      // Se l'area non è stata unita, aggiungila alla lista
-      if (!merged) {
-        optimizedAreas.push({...area});
-      }
-    });
+    // Reimposta direzione e punteggio
+    setDirection('right');
+    setScore(0);
     
-    return optimizedAreas;
-  };
-
-  // Funzione per renderizzare il cibo
-  const renderFood = (ctx) => {
-    if (!foodItems || foodItems.length === 0) return;
-    
-    ctx.fillStyle = '#e74c3c'; // Rosso per il cibo
-    foodItems.forEach(item => {
-      ctx.beginPath();
-      ctx.arc(
-        item.x + gridSizeRef.current / 2,
-        item.y + gridSizeRef.current / 2,
-        gridSizeRef.current / 2,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-    });
-  };
-
-  // Funzione per renderizzare i giocatori (locale e remoti)
-  const renderPlayer = (ctx) => {
-    // Renderizza il giocatore locale
-    if (playerState && playerState.snake && playerState.snake.length > 0) {
-      // Aggiorna la reference al serpente locale per l'area di aggiornamento
-      snakeRef.current = playerState.snake;
-      
-      // Disegna il serpente locale in verde
-      ctx.fillStyle = '#2ecc71'; // Verde per il giocatore locale
-      playerState.snake.forEach((segment, index) => {
-        // Testa leggermente più grande
-        const size = index === 0 ? gridSizeRef.current : gridSizeRef.current - 2;
-        ctx.fillRect(
-          segment.x + (gridSizeRef.current - size) / 2,
-          segment.y + (gridSizeRef.current - size) / 2,
-          size,
-          size
-        );
-      });
-
-      // Disegna il nome del giocatore sopra la testa se disponibile
-      if (playerName) {
-        const head = playerState.snake[0];
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(
-          playerName,
-          head.x + gridSizeRef.current / 2,
-          head.y - 5
-        );
-      }
-    }
-
-    // Renderizza i giocatori remoti interpolati
-    Object.entries(interpolatedPlayers).forEach(([id, player]) => {
-      if (!player.snake || player.snake.length === 0) return;
-      
-      // Disegna il serpente del giocatore remoto in rosso
-      ctx.fillStyle = '#e67e22'; // Arancione per i giocatori remoti
-      player.snake.forEach((segment, index) => {
-        // Testa leggermente più grande
-        const size = index === 0 ? gridSizeRef.current : gridSizeRef.current - 2;
-        ctx.fillRect(
-          segment.x + (gridSizeRef.current - size) / 2,
-          segment.y + (gridSizeRef.current - size) / 2,
-          size,
-          size
-        );
-      });
-
-      // Disegna il nome del giocatore sopra la testa
-      if (player.name) {
-        const head = player.snake[0];
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(
-          player.name,
-          head.x + gridSizeRef.current / 2,
-          head.y - 5
-        );
-      }
-    });
-  };
-
-  // Funzione per renderizzare l'interfaccia utente
-  const renderUI = (ctx) => {
-    if (!canvasRef.current) return;
-    
-    // Disegna il punteggio in alto a sinistra
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 20px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText(`Punteggio: ${score}`, 20, 30);
-    
-    // Disegna il numero di giocatori connessi in alto a destra
-    const playerCount = Object.keys(players).length + 1; // +1 per il giocatore locale
-    ctx.textAlign = 'right';
-    ctx.fillText(
-      `Giocatori: ${playerCount}`,
-      canvasRef.current.width - 20,
-      30
-    );
-    
-    // Mostra messaggi di connessione/disconnessione se presenti
-    if (connectionStatus === 'disconnesso' && Date.now() - lastMessageTime > 3000) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      ctx.font = 'bold 16px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(
-        'Connessione persa',
-        canvasRef.current.width / 2,
-        60
-      );
-    }
-  };
-  
-  // Funzione per renderizzare gli elementi statici
-  const renderStaticElements = (ctx) => {
-    if (!canvasRef.current) return;
-    
-    // Disegna lo sfondo
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      
-    // Disegna la griglia
-    ctx.strokeStyle = '#2a2a2a';
-    ctx.lineWidth = 1;
-    
-    // Disegna linee orizzontali
-    for (let y = 0; y < canvasRef.current.height; y += gridSizeRef.current) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvasRef.current.width, y);
-      ctx.stroke();
-    }
-    
-    // Disegna linee verticali
-    for (let x = 0; x < canvasRef.current.width; x += gridSizeRef.current) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvasRef.current.height);
-      ctx.stroke();
-    }
+    // Avvia il gioco
+    setGameStarted(true);
+    console.log('Gioco avviato!');
   };
   
   return (
     <div className="container">
-      <h1>Snake Battle</h1>
-      
-      {!gameStarted ? (
-        <div className="login-container">
-          <form onSubmit={handleStartGame}>
-            <div className="form-group">
-              <label htmlFor="name">Nome:</label>
-              <input
-                type="text"
-                id="name"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                required
-                placeholder="Inserisci il tuo nome"
-              />
-            </div>
-            
-            <div className="form-group">
-              <label htmlFor="color">Colore:</label>
-              <input
-                type="color"
-                id="color"
-                value={playerColor}
-                onChange={(e) => setPlayerColor(e.target.value)}
-              />
-            </div>
-            
-            <button type="submit">Inizia Partita</button>
-            
-            {error && <p className="error">{error}</p>}
-          </form>
-          
-          <div className="instructions-card">
-            <h2>Come giocare</h2>
-            <ul>
-              <li>Usa le <strong>frecce direzionali</strong> per muovere il serpente</li>
-              <li>Raccogli il <strong>cibo</strong> per crescere e aumentare il punteggio</li>
-              <li>Evita di colpire il tuo serpente o i bordi</li>
-              <li>Competi con altri giocatori in tempo reale!</li>
-            </ul>
-          </div>
-        </div>
-      ) : (
-        <div id="game-container" className="game-container" style={{ 
-          border: '5px solid yellow', 
-          padding: '20px', 
-          position: 'relative', 
-          minHeight: '700px', 
-          backgroundColor: '#111',
-          margin: '0 auto',
-          maxWidth: '900px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          <div className="game-info" style={{ marginBottom: '20px', width: '100%', textAlign: 'center' }}>
-            <p style={{ fontWeight: 'bold', fontSize: '18px' }}>Usa le frecce direzionali ↑ ← ↓ → per muovere il serpente</p>
-            <div className="connection-status" style={{ margin: '10px 0' }}>
-              <span className={`status-indicator ${connectionStatus === 'connected' ? 'connected' : 'disconnected'}`}
-                    style={{ display: 'inline-block', width: '15px', height: '15px', borderRadius: '50%', backgroundColor: connectionStatus === 'connected' ? '#2ecc71' : '#e74c3c', marginRight: '10px' }}></span>
-              Stato: <strong>{connectionStatus}</strong>
-            </div>
-          </div>
-          
-          <canvas 
-            ref={canvasRef} 
-            width="800" 
-            height="600" 
-            style={{
-              display: 'block',
-              margin: '0 auto',
-              border: '5px solid red',
-              borderRadius: '4px',
-              backgroundColor: '#004400',
-              boxShadow: '0 0 30px rgba(255, 0, 0, 0.5)',
-              position: 'relative',
-              zIndex: 10
-            }}
-          />
-          
-          {isMobile && (
-            <div className="mobile-controls">
-              <div 
-                ref={joystickRef} 
-                className="joystick"
-                style={{
-                  position: 'fixed',
-                  bottom: '50px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  width: '150px',
-                  height: '150px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                  border: '2px solid rgba(255, 255, 255, 0.3)',
-                  zIndex: 100
-                }}
-              >
-                <div 
-                  className="joystick-stick"
-                  style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    width: '60px',
-                    height: '60px',
-                    borderRadius: '50%',
-                    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-                    border: '2px solid rgba(255, 255, 255, 0.7)',
-                  }}
-                ></div>
+      <Head>
+        <title>Snake Battle</title>
+        <meta name="description" content="Snake Multiplayer Battle" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+
+      <main className="main">
+        <h1 className="title">Snake Battle</h1>
+        
+        {!gameStarted ? (
+          <div className="loginContainer">
+            <Link href="/snake-game" passHref>
+              <button className="snakeLink">Gioca a Snake (versione offline)</button>
+            </Link>
+            <form onSubmit={handleStartGame} className="loginForm">
+              <div className="form-group">
+                <label htmlFor="name">Nome:</label>
+                <input
+                  type="text"
+                  id="name"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  required
+                  placeholder="Inserisci il tuo nome"
+                />
               </div>
+              
+              <div className="form-group">
+                <label htmlFor="color">Colore:</label>
+                <input
+                  type="color"
+                  id="color"
+                  value={playerColor}
+                  onChange={(e) => setPlayerColor(e.target.value)}
+                />
+              </div>
+              
+              <button type="submit">Inizia Partita</button>
+              
+              {error && <p className="error">{error}</p>}
+            </form>
+            
+            <div className="instructions-card">
+              <h2>Come giocare</h2>
+              <ul>
+                <li>Usa le <strong>frecce direzionali</strong> per muovere il serpente</li>
+                <li>Raccogli il <strong>cibo</strong> per crescere e aumentare il punteggio</li>
+                <li>Evita di colpire il tuo serpente o i bordi</li>
+                <li>Versione semplificata (solo locale)</li>
+              </ul>
             </div>
-          )}
-          
-          <button 
-            className="debug-button"
-            onClick={() => setDebugMode(!debugMode)}
-            style={{
-              position: 'absolute',
-              bottom: '20px',
-              right: '20px',
-              padding: '12px 20px',
-              backgroundColor: debugMode ? '#3498db' : '#2c3e50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              zIndex: 20,
-              fontWeight: 'bold',
-              fontSize: '16px'
-            }}
-          >
-            {debugMode ? 'Disattiva Debug' : 'Attiva Debug'}
-          </button>
-        </div>
-      )}
+          </div>
+        ) : (
+          <div className="game-container">
+            <canvas 
+              ref={canvasRef} 
+              width="800" 
+              height="600" 
+              style={{
+                display: 'block',
+                margin: '0 auto',
+                border: '4px solid #333',
+                borderRadius: '8px',
+                backgroundColor: '#121212',
+                maxWidth: '100%',
+                height: 'auto'
+              }}
+            />
+            
+            {isMobile && (
+              <div className="mobile-controls">
+                <div className="control-button up" onClick={() => direction !== 'down' && setDirection('up')}>▲</div>
+                <div className="controls-row">
+                  <div className="control-button left" onClick={() => direction !== 'right' && setDirection('left')}>◄</div>
+                  <div className="control-button right" onClick={() => direction !== 'left' && setDirection('right')}>►</div>
+                </div>
+                <div className="control-button down" onClick={() => direction !== 'up' && setDirection('down')}>▼</div>
+              </div>
+            )}
+            
+            <button 
+              className="restart-button"
+              onClick={() => setGameStarted(false)}
+            >
+              Ricomincia
+            </button>
+          </div>
+        )}
+      </main>
       
       <style jsx>{`
         .container {
@@ -1853,13 +509,13 @@ export default function Home() {
           text-align: center;
         }
         
-        .login-container {
+        .loginContainer {
           display: flex;
           flex-direction: column;
           align-items: center;
           gap: 20px;
           width: 100%;
-          max-width: 600px;
+          max-width: 500px;
           padding: 20px;
           background-color: #2c3e50;
           border-radius: 10px;
@@ -1930,54 +586,72 @@ export default function Home() {
         }
         
         .game-container {
-          width: 100%;
-          max-width: 840px;
-          padding: 20px;
-          background-color: #2c3e50;
-          border-radius: 10px;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 15px;
-        }
-        
-        .game-info {
+          gap: 20px;
+          margin-top: 20px;
           width: 100%;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
+          max-width: 840px;
         }
         
-        .connection-status {
+        .mobile-controls {
           display: flex;
+          flex-direction: column;
           align-items: center;
-          gap: 5px;
+          margin-top: 20px;
         }
         
-        .status-indicator {
-          width: 12px;
-          height: 12px;
+        .controls-row {
+          display: flex;
+          gap: 50px;
+        }
+        
+        .control-button {
+          width: 60px;
+          height: 60px;
+          background-color: rgba(255, 255, 255, 0.2);
+          border: 2px solid rgba(255, 255, 255, 0.3);
           border-radius: 50%;
-          display: inline-block;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          font-size: 24px;
+          margin: 5px;
+          user-select: none;
+          cursor: pointer;
         }
         
-        .connected {
-          background-color: #2ecc71;
+        .control-button:active {
+          background-color: rgba(255, 255, 255, 0.3);
         }
         
-        .disconnected {
+        .restart-button {
+          margin-top: 20px;
           background-color: #e74c3c;
         }
         
+        .restart-button:hover {
+          background-color: #c0392b;
+        }
+        
         @media (max-width: 768px) {
-          .game-container {
+          .container {
             padding: 10px;
           }
           
-          .game-info {
-            flex-direction: column;
-            gap: 10px;
+          h1 {
+            font-size: 2rem;
+          }
+          
+          .game-container {
+            margin-top: 10px;
+          }
+          
+          .control-button {
+            width: 50px;
+            height: 50px;
+            font-size: 20px;
           }
         }
       `}</style>
