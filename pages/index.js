@@ -236,81 +236,89 @@ export default function Home() {
     console.log('Avvio loop di gioco con setInterval');
     gameLoopActiveRef.current = true; // Marca il game loop come avviato
     
+    // SUPER SEMPLICE: muovi il serpente anche se l'altro loop fallisce
+    const emergencyMoveInterval = setInterval(() => {
+      console.log("⚠️ MOVIMENTO DI EMERGENZA");
+      
+      if (!playerState || !playerState.snake || playerState.snake.length === 0) {
+        console.error("ERRORE: non posso muovere il serpente, dati mancanti");
+        return;
+      }
+      
+      const gridSize = gridSizeRef.current;
+      const head = {...playerState.snake[0]};
+      const canvasWidth = 800;
+      const canvasHeight = 600;
+      
+      // Movimento forzato (anche se in altra direzione)
+      console.log("Direzione attuale:", directionRef.current);
+      
+      switch (directionRef.current) {
+        case 'up':
+          head.y -= gridSize;
+          if (head.y < 0) head.y = canvasHeight - gridSize;
+          break;
+        case 'down':
+          head.y += gridSize;
+          if (head.y >= canvasHeight) head.y = 0;
+          break;
+        case 'left':
+          head.x -= gridSize;
+          if (head.x < 0) head.x = canvasWidth - gridSize;
+          break;
+        case 'right':
+          head.x += gridSize;
+          if (head.x >= canvasWidth) head.x = 0;
+          break;
+      }
+      
+      console.log(`🐍 MOVIMENTO: ${directionRef.current}, nuova posizione: (${head.x}, ${head.y})`);
+      
+      // Aggiorna DIRETTAMENTE senza usare setState
+      if (playerState && playerState.snake && playerState.snake.length > 0) {
+        const newSnake = [head, ...playerState.snake.slice(0, -1)];
+        
+        // Aggiorna lo stato 
+        setPlayerState(prevState => {
+          if (!prevState) return prevState;
+          return {
+            ...prevState,
+            snake: newSnake
+          };
+        });
+      }
+    }, 500); // Un movimento ogni 500ms
+    
+    // Movimento automatico per test
+    let autoMoveTimer = null;
+    const startAutoMove = () => {
+      console.log("🤖 Avvio movimento automatico");
+      
+      // Cambia direzione ogni 3 secondi
+      autoMoveTimer = setInterval(() => {
+        // Cambia direzione in sequenza
+        const directions = ['right', 'down', 'left', 'up'];
+        const currentIndex = directions.indexOf(directionRef.current);
+        const nextIndex = (currentIndex + 1) % directions.length;
+        directionRef.current = directions[nextIndex];
+        console.log(`🤖 Cambio direzione automatico: ${directionRef.current}`);
+      }, 3000);
+    };
+    
+    // Avvia movimento automatico dopo 2 secondi
+    const autoMoveTimeout = setTimeout(startAutoMove, 2000);
+    
     // Riferimenti alle variabili locali che verranno chiuse nel cleanup
     let gameLoopActive = true;
-    let moveIntervalId = null;
-    let serverIntervalId = null;
-    let animFrameId = null;
+    let renderIntervalId = null;
     
     // Piccolo ritardo prima di avviare i loop per garantire che lo stato sia aggiornato
     const startGameLoops = () => {
       if (!gameLoopActive) return; // Evita avvio se già in pulizia
       
-      // Loop di movimento locale - movimento più fluido con frequenza moderata
-      moveIntervalId = setInterval(() => {
-        if (!gameLoopActive) return;
-        
-        // Forza il movimento anche se playerState non è disponibile
-        if (!playerState || !playerState.snake || playerState.snake.length === 0) {
-          console.log('ERRORE: PlayerState non disponibile per il movimento');
-          return;
-        }
-        
-        console.log('Esecuzione ciclo di movimento, direzione:', directionRef.current);
-        
-        const gridSize = gridSizeRef.current;
-        const head = { ...playerState.snake[0] };
-        const canvasWidth = 800;
-        const canvasHeight = 600;
-        
-        // Movimento locale basato sulla direzione
-        switch (directionRef.current) {
-          case 'up':
-            head.y -= gridSize;
-            if (head.y < 0) head.y = canvasHeight - gridSize;
-            break;
-          case 'down':
-            head.y += gridSize;
-            if (head.y >= canvasHeight) head.y = 0;
-            break;
-          case 'left':
-            head.x -= gridSize;
-            if (head.x < 0) head.x = canvasWidth - gridSize;
-            break;
-          case 'right':
-            head.x += gridSize;
-            if (head.x >= canvasWidth) head.x = 0;
-            break;
-        }
-        
-        // DEBUG - Stampa informazioni sulla posizione
-        console.log(`Movimento serpente: ${directionRef.current}, nuova posizione: (${head.x}, ${head.y})`);
-        
-        // Aggiorna la posizione localmente
-        setPlayerState(prev => {
-          if (!prev || !prev.snake || prev.snake.length === 0) {
-            console.log('ERRORE: playerState non valido durante aggiornamento');
-            return prev;
-          }
-          
-          const newSnake = [head, ...prev.snake.slice(0, -1)];
-          
-          // Log della nuova posizione della testa
-          console.log(`Nuova posizione testa serpente: (${head.x}, ${head.y}), lunghezza: ${newSnake.length}`);
-          
-          // Crea una copia profonda per evitare mutazioni
-          return {
-            ...prev,
-            snake: newSnake
-          };
-        });
-        
-        lastDirectionRef.current = directionRef.current;
-      }, 300); // 300ms = più lento (3.3 FPS) per debug e facile visualizzazione
-      
-      // VERSIONE SEMPLIFICATA DEL RENDER LOOP
-      const simplifiedRenderLoop = () => {
-        if (!canvasRef.current || !gameLoopActive) return;
+      // VERSIONE ULTRA SEMPLIFICATA DEL RENDERING con setInterval invece di requestAnimationFrame
+      renderIntervalId = setInterval(() => {
+        if (!gameLoopActive || !canvasRef.current) return;
         
         const ctx = canvasRef.current.getContext('2d');
         if (!ctx) {
@@ -319,21 +327,15 @@ export default function Home() {
         }
         
         // Pulisci il canvas
-        ctx.fillStyle = '#004400';
+        ctx.fillStyle = '#002200';
         ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
         
         // Disegna una griglia semplice
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
         ctx.lineWidth = 1;
         const gridSize = gridSizeRef.current;
         
-        for (let x = 0; x <= canvasRef.current.width; x += gridSize) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, canvasRef.current.height);
-          ctx.stroke();
-        }
-        
+        // Disegna griglia orizzontale
         for (let y = 0; y <= canvasRef.current.height; y += gridSize) {
           ctx.beginPath();
           ctx.moveTo(0, y);
@@ -341,77 +343,66 @@ export default function Home() {
           ctx.stroke();
         }
         
-        // Disegna il cibo in modo MOLTO visibile
+        // Disegna griglia verticale
+        for (let x = 0; x <= canvasRef.current.width; x += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvasRef.current.height);
+          ctx.stroke();
+        }
+        
+        // Disegna il cibo
         if (foodItems && foodItems.length > 0) {
           foodItems.forEach(food => {
-            // Disegna un cerchio giallo più grande per il cibo
+            // Disegna un cerchio giallo per il cibo
             ctx.fillStyle = '#ffff00'; // Giallo brillante
             ctx.beginPath();
             ctx.arc(
               food.x + gridSize/2,
               food.y + gridSize/2,
-              gridSize/2 + 2, // Più grande
+              gridSize/2,
               0,
               Math.PI * 2
             );
             ctx.fill();
             
-            // Aggiungi un contorno rosso
+            // Aggiungi un bordo rosso
             ctx.strokeStyle = '#ff0000';
             ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.arc(
               food.x + gridSize/2,
               food.y + gridSize/2,
-              gridSize/2 + 2,
+              gridSize/2,
               0,
               Math.PI * 2
             );
             ctx.stroke();
           });
-        } else {
-          // Se non c'è cibo, disegna del cibo di test
-          ctx.fillStyle = '#ffff00'; // Giallo brillante
-          ctx.beginPath();
-          ctx.arc(
-            400,
-            300,
-            gridSize,
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
         }
         
-        // MOLTO SEMPLICE: Disegna il serpente locale
+        // Disegna il serpente locale
         if (playerState && playerState.snake && playerState.snake.length > 0) {
           // Disegna il serpente
           ctx.fillStyle = '#00ff00'; // Verde brillante
-          playerState.snake.forEach((segment, index) => {
-            // Disegna segmenti più grandi per maggiore visibilità
+          
+          // Disegna prima il corpo
+          for (let i = playerState.snake.length - 1; i > 0; i--) {
+            const segment = playerState.snake[i];
+            // Disegna segmenti
             ctx.fillRect(
               segment.x,
               segment.y,
-              gridSize,  // Usa l'intera dimensione della griglia
-              gridSize   // Usa l'intera dimensione della griglia
+              gridSize - 1,
+              gridSize - 1
             );
-            
-            // Aggiungi un bordo per ogni segmento
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(
-              segment.x,
-              segment.y,
-              gridSize,
-              gridSize
-            );
-          });
+          }
           
-          // Testa del serpente MOLTO evidente
+          // Disegna la testa con un colore diverso
           if (playerState.snake.length > 0) {
             const head = playerState.snake[0];
             
-            // Disegna un contorno bianco intorno alla testa
+            // Contorno bianco più grande per la testa
             ctx.fillStyle = 'white';
             ctx.fillRect(
               head.x - 2,
@@ -420,7 +411,7 @@ export default function Home() {
               gridSize + 4
             );
             
-            // Disegna la testa in verde brillante
+            // Testa verde
             ctx.fillStyle = '#00ff00';
             ctx.fillRect(
               head.x,
@@ -429,131 +420,146 @@ export default function Home() {
               gridSize
             );
             
-            // Aggiungi occhi alla testa per maggiore visibilità
+            // Aggiungi occhi
             ctx.fillStyle = 'black';
-            // Occhio sinistro
+            
+            // Posizione degli occhi basata sulla direzione
+            let eyeX1, eyeY1, eyeX2, eyeY2;
+            
+            switch(directionRef.current) {
+              case 'up':
+                eyeX1 = head.x + gridSize/4;
+                eyeY1 = head.y + gridSize/4;
+                eyeX2 = head.x + 3*gridSize/4;
+                eyeY2 = head.y + gridSize/4;
+                break;
+              case 'down':
+                eyeX1 = head.x + gridSize/4;
+                eyeY1 = head.y + 3*gridSize/4;
+                eyeX2 = head.x + 3*gridSize/4;
+                eyeY2 = head.y + 3*gridSize/4;
+                break;
+              case 'left':
+                eyeX1 = head.x + gridSize/4;
+                eyeY1 = head.y + gridSize/4;
+                eyeX2 = head.x + gridSize/4;
+                eyeY2 = head.y + 3*gridSize/4;
+                break;
+              case 'right':
+              default:
+                eyeX1 = head.x + 3*gridSize/4;
+                eyeY1 = head.y + gridSize/4;
+                eyeX2 = head.x + 3*gridSize/4;
+                eyeY2 = head.y + 3*gridSize/4;
+                break;
+            }
+            
+            // Occhio 1
             ctx.beginPath();
-            ctx.arc(
-              head.x + gridSize/4,
-              head.y + gridSize/3,
-              3,
-              0,
-              Math.PI * 2
-            );
+            ctx.arc(eyeX1, eyeY1, 3, 0, Math.PI * 2);
             ctx.fill();
-            // Occhio destro
+            
+            // Occhio 2
             ctx.beginPath();
-            ctx.arc(
-              head.x + gridSize*3/4,
-              head.y + gridSize/3,
-              3,
-              0,
-              Math.PI * 2
-            );
+            ctx.arc(eyeX2, eyeY2, 3, 0, Math.PI * 2);
             ctx.fill();
-          }
-        } else {
-          // Se non c'è un serpente utente, disegna un serpente di test
-          ctx.fillStyle = '#ff00ff'; // Fucsia per alta visibilità
-          for (let i = 0; i < 5; i++) {
-            ctx.fillRect(
-              200 + i * gridSize, 
-              200, 
-              gridSize, 
-              gridSize
-            );
           }
         }
         
-        // Informazioni di debug
+        // INFORMAZIONI DI DEBUG
         ctx.fillStyle = 'white';
-        ctx.font = '20px Arial';
+        ctx.font = '16px Arial';
         ctx.textAlign = 'left';
-        ctx.fillText(`Punteggio: ${score}`, 20, 30);
-        ctx.fillText(`Direzione: ${directionRef.current}`, 20, 60);
         
-        // Disegna le coordinate del serpente
+        // Info base
+        ctx.fillText(`Punteggio: ${score}`, 10, 30);
+        ctx.fillText(`Direzione: ${directionRef.current}`, 10, 50);
+        
+        // Info serpente
         if (playerState && playerState.snake && playerState.snake.length > 0) {
           const head = playerState.snake[0];
-          ctx.fillText(`Posizione: (${head.x}, ${head.y})`, 20, 90);
-          ctx.fillText(`Frame: ${frameCountRef.current}`, 20, 120);
+          ctx.fillText(`Posizione: (${head.x}, ${head.y})`, 10, 70);
+          ctx.fillText(`Lunghezza: ${playerState.snake.length}`, 10, 90);
+        } else {
+          ctx.fillText("Serpente non inizializzato", 10, 70);
         }
         
-        // Incremento contatore frame per debug
+        // ID sessione e stato connessione
+        ctx.fillText(`ID: ${playerId?.substring(0,8) || 'sconosciuto'}`, 10, canvasRef.current.height - 70);
+        ctx.fillText(`Connessione: ${connectionStatus}`, 10, canvasRef.current.height - 50);
+        
+        // Frame counter per debug
         frameCountRef.current++;
-        
-        // Continua il loop
-        animFrameId = requestAnimationFrame(simplifiedRenderLoop);
-      };
-      
-      // Reset contatore frame
-      frameCountRef.current = 0;
-      
-      // Avvia il loop di rendering semplificato
-      animFrameId = requestAnimationFrame(simplifiedRenderLoop);
-      
-      // Comunicazione col server - frequenza adeguata ai requisiti
-      serverIntervalId = setInterval(() => {
-        if (gameLoopActive) {
-          updateWithServer();
-        }
-      }, 1000); // Più lento per debug (1 volta al secondo)
-      
-      // Memorizza gli intervalli per la pulizia
-      renderLoopRef.current = animFrameId;
-      apiLoopRef.current = serverIntervalId;
+        ctx.fillText(`Frame: ${frameCountRef.current}`, 10, canvasRef.current.height - 30);
+      }, 1000/30); // 30 FPS
     };
     
     // Avvia i loops con un piccolo ritardo per evitare sfarfallio
     const timeoutId = setTimeout(startGameLoops, 500);
     
-    // Debug: movimento automatico per test
-    const autoMoveTimeoutId = setTimeout(() => {
-      // Sequenza di movimenti automatici per test
-      console.log('Avvio movimento automatico per test');
-      
-      // Movimento automatico ogni 2 secondi
-      const autoMoveIntervalId = setInterval(() => {
-        console.log('Movimento automatico');
-        
-        // Cambia direzione in sequenza
-        const directions = ['right', 'down', 'left', 'up'];
-        const currentIndex = directions.indexOf(directionRef.current);
-        const nextIndex = (currentIndex + 1) % directions.length;
-        directionRef.current = directions[nextIndex];
-        
-        console.log('Direzione automatica:', directionRef.current);
-      }, 2000);
-      
-      // Aggiungi l'intervallo alla pulizia
-      return () => clearInterval(autoMoveIntervalId);
-    }, 3000);
-    
     // Pulizia
     return () => {
       console.log('Pulizia game loop...');
-      gameLoopActive = false; // Imposta flag di pulizia
-      gameLoopActiveRef.current = false; // Marca il game loop come non attivo per consentire un riavvio futuro
+      gameLoopActive = false;
+      gameLoopActiveRef.current = false;
       
+      // Pulisci timer
       clearTimeout(timeoutId);
-      clearTimeout(autoMoveTimeoutId);
+      clearTimeout(autoMoveTimeout);
+      if (autoMoveTimer) clearInterval(autoMoveTimer);
       
-      // Pulisci tutti gli interval e timeout
-      if (moveIntervalId) clearInterval(moveIntervalId);
-      if (serverIntervalId) clearInterval(serverIntervalId);
-      if (animFrameId) cancelAnimationFrame(animFrameId);
-      
-      // Pulisci anche i riferimenti globali
-      if (renderLoopRef.current) {
-        cancelAnimationFrame(renderLoopRef.current);
-        renderLoopRef.current = null;
-      }
-      if (apiLoopRef.current) {
-        clearInterval(apiLoopRef.current);
-        apiLoopRef.current = null;
-      }
+      // Pulisci intervalli
+      clearInterval(emergencyMoveInterval);
+      if (renderIntervalId) clearInterval(renderIntervalId);
     };
   }, [gameStarted, playerId]);
+  
+  // Assicurarsi che il canvas sia della dimensione corretta per mobile
+  useEffect(() => {
+    if (!gameStarted) return;
+    
+    const handleResize = () => {
+      if (!canvasRef.current) return;
+      
+      // Ottieni la dimensione del dispositivo
+      const isMobile = window.innerWidth < 768;
+      console.log(`Rilevato dispositivo ${isMobile ? 'mobile' : 'desktop'}, larghezza: ${window.innerWidth}`);
+      
+      const canvas = canvasRef.current;
+      const container = document.getElementById('game-container');
+      
+      if (!container) {
+        console.error('Container non trovato');
+        return;
+      }
+      
+      // Dimensione fissa per il gioco (non cambiare queste)
+      canvas.width = 800;
+      canvas.height = 600;
+      
+      if (isMobile) {
+        // Adattamento per mobile (massimo 100% della larghezza disponibile)
+        const scale = Math.min(1, (window.innerWidth - 40) / canvas.width);
+        canvas.style.width = `${canvas.width * scale}px`;
+        canvas.style.height = `${canvas.height * scale}px`;
+        console.log(`Canvas ridimensionato per mobile, scala: ${scale}`);
+      } else {
+        // Su desktop, mantieni le dimensioni originali
+        canvas.style.width = `${canvas.width}px`;
+        canvas.style.height = `${canvas.height}px`;
+      }
+    };
+    
+    // Esegui al caricamento
+    handleResize();
+    
+    // Aggiungi listener per il ridimensionamento
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [gameStarted]);
   
   // Funzione di comunicazione con il server semplificata 
   const updateWithServer = async () => {
@@ -1248,6 +1254,7 @@ export default function Home() {
         ctx.lineWidth = 0.5;
         const gridSize = gridSizeRef.current;
         
+        // Disegna linee verticali
         for (let x = 0; x <= canvas.width; x += gridSize) {
           ctx.beginPath();
           ctx.moveTo(x, 0);
@@ -1255,10 +1262,11 @@ export default function Home() {
           ctx.stroke();
         }
         
+        // Disegna linee orizzontali (corretto)
         for (let y = 0; y <= canvas.height; y += gridSize) {
           ctx.beginPath();
           ctx.moveTo(0, y);
-          ctx.lineTo(canvas.width, y);
+          ctx.lineTo(canvas.width, y); // Corretto: linea da sinistra a destra
           ctx.stroke();
         }
       }
