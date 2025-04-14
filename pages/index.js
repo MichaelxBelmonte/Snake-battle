@@ -409,9 +409,9 @@ export default function Home() {
         
         {!gameStarted ? (
           <div className="loginContainer">
-            <Link href="/snake-basic" passHref>
-              <button className="snakeLink">Gioca a Snake (versione offline)</button>
-            </Link>
+            <a href="/snake.html" className="snakeLink">
+              <button>Gioca a Snake (versione offline)</button>
+            </a>
             <form onSubmit={handleStartGame} className="loginForm">
               <div className="form-group">
                 <label htmlFor="name">Nome:</label>
