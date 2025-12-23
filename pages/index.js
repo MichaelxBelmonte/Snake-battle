@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Head from 'next/head';
 import { io } from 'socket.io-client';
+import { createClient } from '@supabase/supabase-js';
+
+// Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 // Server URL - Socket.IO server
 const getServerUrl = () => {
@@ -161,6 +167,58 @@ export default function Home() {
   const interpolationFactorRef = useRef(0);
 
   const [isMobile, setIsMobile] = useState(false);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [personalBest, setPersonalBest] = useState(0);
+  const lastScoreRef = useRef(0);
+
+  // Fetch leaderboard from Supabase
+  const fetchLeaderboard = useCallback(async () => {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from('leaderboard')
+        .select('*')
+        .order('score', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+      setLeaderboard(data || []);
+    } catch (err) {
+      console.error('Error fetching leaderboard:', err);
+    }
+  }, []);
+
+  // Save score to Supabase
+  const saveScore = useCallback(async (name, score, color, skin) => {
+    if (!supabase || score <= 0) return;
+    try {
+      const { error } = await supabase
+        .from('leaderboard')
+        .insert([{
+          player_name: name,
+          score: score,
+          snake_color: color,
+          snake_skin: skin
+        }]);
+
+      if (error) throw error;
+
+      // Update personal best
+      if (score > personalBest) {
+        setPersonalBest(score);
+      }
+
+      // Refresh leaderboard
+      fetchLeaderboard();
+    } catch (err) {
+      console.error('Error saving score:', err);
+    }
+  }, [personalBest, fetchLeaderboard]);
+
+  // Fetch leaderboard on mount
+  useEffect(() => {
+    fetchLeaderboard();
+  }, [fetchLeaderboard]);
 
   // Mobile detection
   useEffect(() => {
@@ -534,6 +592,13 @@ export default function Home() {
         const myPlayer = state.players.find(p => p.id === playerId);
         if (myPlayer) {
           directionRef.current = myPlayer.direction;
+
+          // Detect death: score reset to 0 when previous score was > 0
+          if (myPlayer.score === 0 && lastScoreRef.current > 0) {
+            // Player died - save their score to leaderboard
+            saveScore(playerName, lastScoreRef.current, playerColor, playerSkin);
+          }
+          lastScoreRef.current = myPlayer.score;
         }
       });
 
@@ -753,6 +818,37 @@ export default function Home() {
                 {error && <p className="error">{error}</p>}
               </form>
             </div>
+
+            {/* Leaderboard */}
+            {leaderboard.length > 0 && (
+              <div className="leaderboard-section">
+                <h3 className="leaderboard-title">
+                  <span>🏆</span> Hall of Fame
+                </h3>
+                <div className="leaderboard-list">
+                  {leaderboard.slice(0, 5).map((entry, index) => (
+                    <div key={entry.id} className={`leaderboard-entry ${index === 0 ? 'first' : ''} ${index === 1 ? 'second' : ''} ${index === 2 ? 'third' : ''}`}>
+                      <span className="entry-rank">
+                        {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
+                      </span>
+                      <span className="entry-name" style={{ color: entry.snake_color || '#22c55e' }}>
+                        {entry.player_name}
+                      </span>
+                      <span className="entry-skin">
+                        {SNAKE_SKINS.find(s => s.id === entry.snake_skin)?.icon || '🟩'}
+                      </span>
+                      <span className="entry-score">{entry.score}</span>
+                    </div>
+                  ))}
+                </div>
+                {personalBest > 0 && (
+                  <div className="personal-best">
+                    <span>Il tuo record: </span>
+                    <strong>{personalBest}</strong>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Instructions */}
             <div className="instructions">
@@ -1370,6 +1466,107 @@ export default function Home() {
         .food-dot.normal { background: #FF6347; }
         .food-dot.bonus { background: #FFD700; box-shadow: 0 0 8px #FFD700; }
         .food-dot.super { background: #9932CC; box-shadow: 0 0 8px #9932CC; }
+
+        /* ========== LEADERBOARD ========== */
+        .leaderboard-section {
+          width: 100%;
+          max-width: 400px;
+          padding: 20px;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 16px;
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          animation: fadeInUp 0.8s ease 0.5s both;
+        }
+
+        .leaderboard-title {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          font-size: 1.3rem;
+          color: #FFD700;
+          margin: 0 0 15px 0;
+          text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+        }
+
+        .leaderboard-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .leaderboard-entry {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 15px;
+          background: rgba(0, 0, 0, 0.2);
+          border-radius: 10px;
+          transition: all 0.3s ease;
+        }
+
+        .leaderboard-entry:hover {
+          background: rgba(0, 0, 0, 0.3);
+          transform: translateX(5px);
+        }
+
+        .leaderboard-entry.first {
+          background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 215, 0, 0.1));
+          border: 1px solid rgba(255, 215, 0, 0.3);
+        }
+
+        .leaderboard-entry.second {
+          background: linear-gradient(135deg, rgba(192, 192, 192, 0.2), rgba(192, 192, 192, 0.1));
+          border: 1px solid rgba(192, 192, 192, 0.3);
+        }
+
+        .leaderboard-entry.third {
+          background: linear-gradient(135deg, rgba(205, 127, 50, 0.2), rgba(205, 127, 50, 0.1));
+          border: 1px solid rgba(205, 127, 50, 0.3);
+        }
+
+        .entry-rank {
+          font-size: 1.2rem;
+          min-width: 30px;
+          text-align: center;
+        }
+
+        .entry-name {
+          flex: 1;
+          font-weight: 600;
+          font-size: 0.95rem;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .entry-skin {
+          font-size: 1.1rem;
+        }
+
+        .entry-score {
+          font-weight: 700;
+          font-size: 1rem;
+          color: #4CAF50;
+          min-width: 50px;
+          text-align: right;
+        }
+
+        .personal-best {
+          margin-top: 15px;
+          padding: 10px;
+          text-align: center;
+          background: rgba(76, 175, 80, 0.1);
+          border-radius: 8px;
+          color: rgba(255, 255, 255, 0.7);
+          font-size: 0.9rem;
+        }
+
+        .personal-best strong {
+          color: #4CAF50;
+          font-size: 1.1rem;
+        }
 
         /* ========== FOOTER ========== */
         .footer {
