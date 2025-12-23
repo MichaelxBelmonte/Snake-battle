@@ -158,6 +158,8 @@ export default function Home() {
   const gridCanvasRef = useRef(null);
   const socketRef = useRef(null);
   const directionRef = useRef('right');
+  const playerIdRef = useRef(null);
+  const playerDataRef = useRef({ name: '', color: '#22c55e', skin: 'classic' });
   const gridSize = 20;
 
   // Interpolation refs for smooth rendering
@@ -190,18 +192,33 @@ export default function Home() {
 
   // Save score to Supabase
   const saveScore = useCallback(async (name, score, color, skin) => {
-    if (!supabase || score <= 0) return;
+    console.log('saveScore called:', { name, score, color, skin, supabaseEnabled: !!supabase });
+    if (!supabase) {
+      console.warn('Supabase not configured');
+      return;
+    }
+    if (score <= 0) {
+      console.log('Score too low, not saving');
+      return;
+    }
     try {
-      const { error } = await supabase
+      console.log('Inserting score to Supabase...');
+      const { data, error } = await supabase
         .from('leaderboard')
         .insert([{
           player_name: name,
           score: score,
           snake_color: color,
           snake_skin: skin
-        }]);
+        }])
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase insert error:', error);
+        throw error;
+      }
+
+      console.log('Score saved successfully:', data);
 
       // Update personal best
       if (score > personalBest) {
@@ -564,6 +581,10 @@ export default function Home() {
         console.log('Connected to server:', socket.id);
         setConnectionStatus('connected');
 
+        // Store player data in refs for use in event handlers
+        playerIdRef.current = socket.id;
+        playerDataRef.current = { name: playerName, color: playerColor, skin: playerSkin };
+
         // Join the game
         socket.emit('join', {
           name: playerName,
@@ -575,6 +596,7 @@ export default function Home() {
       socket.on('joined', (data) => {
         console.log('Joined game:', data);
         setPlayerId(data.id);
+        playerIdRef.current = data.id;
         setGameStarted(true);
         setIsLoading(false);
       });
@@ -588,15 +610,17 @@ export default function Home() {
 
         setGameState(state);
 
-        // Update direction ref from server state
-        const myPlayer = state.players.find(p => p.id === playerId);
+        // Update direction ref from server state - use ref instead of state to avoid stale closure
+        const myPlayer = state.players.find(p => p.id === playerIdRef.current);
         if (myPlayer) {
           directionRef.current = myPlayer.direction;
 
           // Detect death: score reset to 0 when previous score was > 0
           if (myPlayer.score === 0 && lastScoreRef.current > 0) {
             // Player died - save their score to leaderboard
-            saveScore(playerName, lastScoreRef.current, playerColor, playerSkin);
+            const pd = playerDataRef.current;
+            console.log('Player died! Saving score:', lastScoreRef.current);
+            saveScore(pd.name, lastScoreRef.current, pd.color, pd.skin);
           }
           lastScoreRef.current = myPlayer.score;
         }
