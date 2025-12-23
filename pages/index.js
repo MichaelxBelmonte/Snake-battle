@@ -720,195 +720,211 @@ export default function Home() {
 
       <main className="main">
         {!gameStarted ? (
-          <>
-            {/* Hero Section */}
-            <div className="hero">
-              <div className="logo">
+          <div className="landing-container">
+            {/* Hero Section - Compact */}
+            <header className="hero">
+              <div className="hero-content">
                 <span className="logo-icon">🐍</span>
-                <h1 className="title">
-                  <span className="title-snake">SNAKE</span>
-                  <span className="title-battle">BATTLE</span>
-                </h1>
+                <div className="hero-text">
+                  <h1 className="title">SNAKE BATTLE</h1>
+                  <p className="subtitle">Multiplayer Arena</p>
+                </div>
               </div>
-              <p className="subtitle">Multiplayer Arena</p>
-
-              {/* Online indicator */}
               <div className="online-badge">
                 <span className="pulse"></span>
-                <span>{onlinePlayers} {onlinePlayers === 1 ? 'giocatore' : 'giocatori'} online</span>
+                <span>{onlinePlayers} online</span>
               </div>
-            </div>
+            </header>
 
-            {/* Main Card */}
-            <div className="card">
-              <form onSubmit={handleStartGame} className="form">
-                {/* Snake Preview */}
-                <div className="snake-preview">
-                  <div className="preview-snake">
-                    {[0, 1, 2, 3, 4].map((i) => {
-                      const style = getSegmentStyle(playerSkin, playerColor, i, 5, Date.now());
-                      return (
-                        <div
-                          key={i}
-                          className="preview-segment"
-                          style={{
-                            backgroundColor: style.color,
-                            opacity: style.alpha,
-                            transform: `scale(${1 - i * 0.08})`,
-                            boxShadow: style.glow ? `0 0 ${style.glowBlur}px ${style.glowColor}` : 'none'
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
-                  <span className="preview-name">{playerName || 'Il tuo nome'}</span>
-                  <span className="preview-skin">{SNAKE_SKINS.find(s => s.id === playerSkin)?.icon} {SNAKE_SKINS.find(s => s.id === playerSkin)?.name}</span>
+            {/* Main Content - Two Column Layout */}
+            <div className="content-grid">
+              {/* Left Column - Player Setup */}
+              <div className="panel panel-setup">
+                <div className="panel-header">
+                  <h2>Crea il tuo Snake</h2>
                 </div>
 
-                <div className="input-group">
-                  <input
-                    type="text"
-                    id="name"
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    required
-                    placeholder=" "
-                    maxLength={15}
-                    className="input"
-                  />
-                  <label htmlFor="name" className="input-label">Nome Giocatore</label>
-                  <span className="input-icon">👤</span>
-                </div>
-
-                {/* Color Selection */}
-                <div className="color-section">
-                  <div className="color-selected" style={{ backgroundColor: playerColor }}>
-                    <span className="color-check">✓</span>
-                  </div>
-                  <div className="color-picker-wrapper">
-                    {['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#eab308', '#06b6d4', '#ec4899', '#ef4444', '#8b5cf6', '#14b8a6'].map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        className={`color-dot ${playerColor === color ? 'active' : ''}`}
-                        style={{ '--dot-color': color }}
-                        onClick={() => setPlayerColor(color)}
-                      />
-                    ))}
-                    <label className="color-custom-wrapper">
-                      <input
-                        type="color"
-                        value={playerColor}
-                        onChange={(e) => setPlayerColor(e.target.value)}
-                        className="color-input-hidden"
-                      />
-                      <span className="color-custom-btn">+</span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Skin Selection */}
-                <div className="skin-section">
-                  <label className="skin-label">Scegli la tua Skin</label>
-                  <div className="skin-grid">
-                    {SNAKE_SKINS.map((skin) => (
-                      <button
-                        key={skin.id}
-                        type="button"
-                        className={`skin-card ${playerSkin === skin.id ? 'active' : ''}`}
-                        onClick={() => setPlayerSkin(skin.id)}
-                      >
-                        <span className="skin-icon">{skin.icon}</span>
-                        <span className="skin-name">{skin.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <button type="submit" disabled={isLoading} className="play-btn">
-                  {isLoading ? (
-                    <>
-                      <span className="spinner"></span>
-                      Connessione...
-                    </>
-                  ) : (
-                    <>
-                      <span className="play-icon">▶</span>
-                      GIOCA ORA
-                    </>
-                  )}
-                </button>
-
-                {error && <p className="error">{error}</p>}
-              </form>
-            </div>
-
-            {/* Leaderboard */}
-            {leaderboard.length > 0 && (
-              <div className="leaderboard-section">
-                <h3 className="leaderboard-title">
-                  <span>🏆</span> Hall of Fame
-                </h3>
-                <div className="leaderboard-list">
-                  {leaderboard.slice(0, 5).map((entry, index) => (
-                    <div key={entry.id} className={`leaderboard-entry ${index === 0 ? 'first' : ''} ${index === 1 ? 'second' : ''} ${index === 2 ? 'third' : ''}`}>
-                      <span className="entry-rank">
-                        {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
-                      </span>
-                      <span className="entry-name" style={{ color: entry.snake_color || '#22c55e' }}>
-                        {entry.player_name}
-                      </span>
-                      <span className="entry-skin">
-                        {SNAKE_SKINS.find(s => s.id === entry.snake_skin)?.icon || '🟩'}
-                      </span>
-                      <span className="entry-score">{entry.score}</span>
+                <form onSubmit={handleStartGame} className="setup-form">
+                  {/* Live Preview */}
+                  <div className="preview-card">
+                    <div className="preview-snake-row">
+                      {[0, 1, 2, 3, 4, 5, 6].map((i) => {
+                        const style = getSegmentStyle(playerSkin, playerColor, i, 7, Date.now());
+                        return (
+                          <div
+                            key={i}
+                            className="preview-segment"
+                            style={{
+                              backgroundColor: style.color,
+                              opacity: style.alpha,
+                              boxShadow: style.glow ? `0 0 ${style.glowBlur}px ${style.glowColor}` : 'none'
+                            }}
+                          />
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
-                {personalBest > 0 && (
-                  <div className="personal-best">
-                    <span>Il tuo record: </span>
-                    <strong>{personalBest}</strong>
+                    <div className="preview-info">
+                      <span className="preview-name">{playerName || 'Player'}</span>
+                      <span className="preview-skin-badge">
+                        {SNAKE_SKINS.find(s => s.id === playerSkin)?.icon} {SNAKE_SKINS.find(s => s.id === playerSkin)?.name}
+                      </span>
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
 
-            {/* Instructions */}
-            <div className="instructions">
-              <h3>Come Giocare</h3>
-              <div className="instruction-grid">
-                <div className="instruction-item">
-                  <span className="instruction-icon">🎮</span>
-                  <span>Frecce o WASD per muoverti</span>
-                </div>
-                <div className="instruction-item">
-                  <span className="instruction-icon">🍎</span>
-                  <span>Mangia il cibo per crescere</span>
-                </div>
-                <div className="instruction-item">
-                  <span className="instruction-icon">💀</span>
-                  <span>Evita collisioni (score reset!)</span>
-                </div>
-                <div className="instruction-item">
-                  <span className="instruction-icon">🏆</span>
-                  <span>Uccidi altri per +50 punti</span>
-                </div>
+                  {/* Name Input */}
+                  <div className="form-group">
+                    <label className="form-label">Nome</label>
+                    <input
+                      type="text"
+                      value={playerName}
+                      onChange={(e) => setPlayerName(e.target.value)}
+                      required
+                      placeholder="Inserisci il tuo nome"
+                      maxLength={15}
+                      className="form-input"
+                    />
+                  </div>
+
+                  {/* Color Selection */}
+                  <div className="form-group">
+                    <label className="form-label">Colore</label>
+                    <div className="color-grid">
+                      {['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#eab308', '#06b6d4', '#ec4899', '#ef4444'].map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          className={`color-btn ${playerColor === color ? 'active' : ''}`}
+                          style={{ backgroundColor: color }}
+                          onClick={() => setPlayerColor(color)}
+                        />
+                      ))}
+                      <label className="color-custom">
+                        <input
+                          type="color"
+                          value={playerColor}
+                          onChange={(e) => setPlayerColor(e.target.value)}
+                        />
+                        <span>+</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Skin Selection */}
+                  <div className="form-group">
+                    <label className="form-label">Skin</label>
+                    <div className="skin-grid">
+                      {SNAKE_SKINS.map((skin) => (
+                        <button
+                          key={skin.id}
+                          type="button"
+                          className={`skin-btn ${playerSkin === skin.id ? 'active' : ''}`}
+                          onClick={() => setPlayerSkin(skin.id)}
+                          title={skin.description}
+                        >
+                          <span className="skin-icon">{skin.icon}</span>
+                          <span className="skin-name">{skin.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Play Button */}
+                  <button type="submit" disabled={isLoading} className="play-btn">
+                    {isLoading ? (
+                      <><span className="spinner"></span> Connessione...</>
+                    ) : (
+                      <><span className="play-icon">▶</span> GIOCA ORA</>
+                    )}
+                  </button>
+
+                  {error && <p className="error-msg">{error}</p>}
+                </form>
               </div>
 
-              {/* Food Types */}
-              <div className="food-legend">
-                <span className="food-item"><span className="food-dot normal"></span> +10</span>
-                <span className="food-item"><span className="food-dot bonus"></span> +25</span>
-                <span className="food-item"><span className="food-dot super"></span> +50</span>
+              {/* Right Column - Leaderboard & Rules */}
+              <div className="panel-stack">
+                {/* Leaderboard */}
+                <div className="panel panel-leaderboard">
+                  <div className="panel-header">
+                    <h2>🏆 Hall of Fame</h2>
+                  </div>
+                  <div className="leaderboard">
+                    {leaderboard.length > 0 ? (
+                      <>
+                        {leaderboard.slice(0, 5).map((entry, index) => (
+                          <div key={entry.id} className={`lb-row ${index < 3 ? `rank-${index + 1}` : ''}`}>
+                            <span className="lb-rank">
+                              {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
+                            </span>
+                            <span className="lb-name" style={{ color: entry.snake_color || '#22c55e' }}>
+                              {entry.player_name}
+                            </span>
+                            <span className="lb-skin">{SNAKE_SKINS.find(s => s.id === entry.snake_skin)?.icon || '🟩'}</span>
+                            <span className="lb-score">{entry.score}</span>
+                          </div>
+                        ))}
+                        {personalBest > 0 && (
+                          <div className="personal-best">
+                            Il tuo record: <strong>{personalBest}</strong>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="lb-empty">
+                        <span>🎮</span>
+                        <p>Nessun record ancora!</p>
+                        <p>Sii il primo!</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* How to Play */}
+                <div className="panel panel-rules">
+                  <div className="panel-header">
+                    <h2>Come Giocare</h2>
+                  </div>
+                  <div className="rules-grid">
+                    <div className="rule">
+                      <span className="rule-icon">🎮</span>
+                      <span>Frecce o WASD</span>
+                    </div>
+                    <div className="rule">
+                      <span className="rule-icon">🍎</span>
+                      <span>Mangia e cresci</span>
+                    </div>
+                    <div className="rule">
+                      <span className="rule-icon">💀</span>
+                      <span>Evita collisioni</span>
+                    </div>
+                    <div className="rule">
+                      <span className="rule-icon">⚔️</span>
+                      <span>Elimina nemici</span>
+                    </div>
+                  </div>
+                  <div className="food-types">
+                    <div className="food-type">
+                      <span className="food-dot red"></span>
+                      <span>+10</span>
+                    </div>
+                    <div className="food-type">
+                      <span className="food-dot gold"></span>
+                      <span>+25</span>
+                    </div>
+                    <div className="food-type">
+                      <span className="food-dot purple"></span>
+                      <span>+50</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
             {/* Footer */}
             <footer className="footer">
-              <p>Snake Battle v1.0 - Made with ❤️</p>
+              Snake Battle v1.0 — Made with ❤️
             </footer>
-          </>
+          </div>
         ) : (
           <div className="game-wrapper">
             {/* Game Header */}
@@ -1004,105 +1020,86 @@ export default function Home() {
           width: 100%;
           height: 100%;
           background-image:
-            linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
-          background-size: 50px 50px;
-          animation: gridMove 20s linear infinite;
-        }
-
-        @keyframes gridMove {
-          0% { transform: translate(0, 0); }
-          100% { transform: translate(50px, 50px); }
+            linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+          background-size: 40px 40px;
         }
 
         .main {
           position: relative;
           z-index: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          padding: 20px;
           min-height: 100vh;
         }
 
-        /* ========== HERO SECTION ========== */
+        /* ========== LANDING CONTAINER ========== */
+        .landing-container {
+          display: flex;
+          flex-direction: column;
+          min-height: 100vh;
+          padding: 20px;
+          max-width: 1000px;
+          margin: 0 auto;
+        }
+
+        /* ========== HERO ========== */
         .hero {
-          text-align: center;
-          margin-bottom: 30px;
-          animation: fadeInDown 0.8s ease;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 15px 0;
+          margin-bottom: 25px;
+          border-bottom: 1px solid rgba(255,255,255,0.1);
         }
 
-        @keyframes fadeInDown {
-          from { opacity: 0; transform: translateY(-30px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-
-        .logo {
+        .hero-content {
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 15px;
-          margin-bottom: 10px;
+          gap: 12px;
         }
 
         .logo-icon {
-          font-size: 4rem;
-          animation: bounce 2s ease infinite;
-          filter: drop-shadow(0 0 20px rgba(76, 175, 80, 0.5));
+          font-size: 2.5rem;
+          filter: drop-shadow(0 0 15px rgba(76, 175, 80, 0.5));
         }
 
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-10px); }
+        .hero-text {
+          display: flex;
+          flex-direction: column;
         }
 
         .title {
-          display: flex;
-          flex-direction: column;
+          font-size: 1.8rem;
+          font-weight: 800;
           margin: 0;
-          line-height: 1;
-        }
-
-        .title-snake {
-          font-size: 3.5rem;
-          font-weight: 900;
           background: linear-gradient(135deg, #4CAF50, #8BC34A);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
-          text-shadow: 0 0 40px rgba(76, 175, 80, 0.3);
-        }
-
-        .title-battle {
-          font-size: 2rem;
-          font-weight: 300;
-          letter-spacing: 0.5em;
-          color: #fff;
-          text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+          letter-spacing: 0.05em;
         }
 
         .subtitle {
-          font-size: 1.1rem;
-          color: rgba(255, 255, 255, 0.7);
-          margin: 0;
-          letter-spacing: 0.2em;
+          font-size: 0.75rem;
+          color: rgba(255,255,255,0.5);
           text-transform: uppercase;
+          letter-spacing: 0.2em;
+          margin: 0;
         }
 
         .online-badge {
-          display: inline-flex;
+          display: flex;
           align-items: center;
           gap: 8px;
-          margin-top: 15px;
           padding: 8px 16px;
-          background: rgba(76, 175, 80, 0.2);
-          border: 1px solid rgba(76, 175, 80, 0.4);
+          background: rgba(76, 175, 80, 0.15);
+          border: 1px solid rgba(76, 175, 80, 0.3);
           border-radius: 50px;
-          font-size: 0.9rem;
+          font-size: 0.85rem;
+          color: #4CAF50;
         }
 
         .pulse {
-          width: 10px;
-          height: 10px;
+          width: 8px;
+          height: 8px;
           background: #4CAF50;
           border-radius: 50%;
           animation: pulse 2s ease infinite;
@@ -1110,183 +1107,190 @@ export default function Home() {
 
         @keyframes pulse {
           0%, 100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
-          50% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
+          50% { box-shadow: 0 0 0 8px rgba(76, 175, 80, 0); }
         }
 
-        /* ========== CARD ========== */
-        .card {
-          background: rgba(255, 255, 255, 0.05);
-          backdrop-filter: blur(20px);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 24px;
-          padding: 30px;
-          width: 100%;
-          max-width: 420px;
-          animation: fadeInUp 0.8s ease 0.2s both;
-        }
-
-        @keyframes fadeInUp {
-          from { opacity: 0; transform: translateY(30px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-
-        .form {
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-        }
-
-        /* Snake Preview */
-        .snake-preview {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          padding: 20px;
-          background: rgba(0, 0, 0, 0.3);
-          border-radius: 16px;
-          margin-bottom: 10px;
-        }
-
-        .preview-snake {
-          display: flex;
-          gap: 4px;
-          margin-bottom: 10px;
-        }
-
-        .preview-segment {
-          width: 24px;
-          height: 24px;
-          border-radius: 4px;
-          transition: all 0.3s ease;
-        }
-
-        .preview-name {
-          font-size: 1rem;
-          font-weight: 600;
-          color: rgba(255, 255, 255, 0.8);
-        }
-
-        .preview-skin {
-          font-size: 0.85rem;
-          color: rgba(255, 255, 255, 0.6);
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        /* Input Group */
-        .input-group {
-          position: relative;
-        }
-
-        .input {
-          width: 100%;
-          padding: 16px 16px 16px 45px;
-          background: rgba(255, 255, 255, 0.1);
-          border: 2px solid rgba(255, 255, 255, 0.1);
-          border-radius: 12px;
-          color: white;
-          font-size: 1rem;
-          transition: all 0.3s ease;
-          box-sizing: border-box;
-        }
-
-        .input:focus {
-          outline: none;
-          border-color: #4CAF50;
-          background: rgba(255, 255, 255, 0.15);
-        }
-
-        .input-label {
-          position: absolute;
-          left: 45px;
-          top: 50%;
-          transform: translateY(-50%);
-          color: rgba(255, 255, 255, 0.5);
-          transition: all 0.3s ease;
-          pointer-events: none;
-        }
-
-        .input:focus + .input-label,
-        .input:not(:placeholder-shown) + .input-label {
-          top: 0;
-          left: 12px;
-          font-size: 0.75rem;
-          background: #302b63;
-          padding: 0 8px;
-          border-radius: 4px;
-        }
-
-        .input-icon {
-          position: absolute;
-          left: 16px;
-          top: 50%;
-          transform: translateY(-50%);
-          font-size: 1.2rem;
-        }
-
-        /* Color Section - Modern Design */
-        .color-section {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-          padding: 16px;
-          background: rgba(0, 0, 0, 0.2);
-          border-radius: 16px;
-        }
-
-        .color-selected {
-          width: 50px;
-          height: 50px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-          transition: all 0.3s ease;
-          flex-shrink: 0;
-        }
-
-        .color-check {
-          color: white;
-          font-size: 1.5rem;
-          text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-        }
-
-        .color-picker-wrapper {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
+        /* ========== CONTENT GRID ========== */
+        .content-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 25px;
           flex: 1;
         }
 
-        .color-dot {
+        /* ========== PANELS ========== */
+        .panel {
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 16px;
+          overflow: hidden;
+        }
+
+        .panel-header {
+          padding: 16px 20px;
+          background: rgba(0, 0, 0, 0.2);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .panel-header h2 {
+          margin: 0;
+          font-size: 1rem;
+          font-weight: 600;
+          color: rgba(255, 255, 255, 0.9);
+        }
+
+        .panel-setup {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .panel-stack {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+
+        /* ========== SETUP FORM ========== */
+        .setup-form {
+          padding: 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+          flex: 1;
+        }
+
+        /* Preview Card */
+        .preview-card {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
+          padding: 20px;
+          background: linear-gradient(135deg, rgba(0,0,0,0.3), rgba(0,0,0,0.2));
+          border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .preview-snake-row {
+          display: flex;
+          gap: 4px;
+        }
+
+        .preview-segment {
           width: 28px;
           height: 28px;
-          border-radius: 50%;
-          border: none;
-          background: var(--dot-color);
+          border-radius: 4px;
+          transition: all 0.2s ease;
+        }
+
+        .preview-info {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .preview-name {
+          font-size: 1.1rem;
+          font-weight: 700;
+          color: white;
+        }
+
+        .preview-skin-badge {
+          font-size: 0.8rem;
+          color: rgba(255,255,255,0.5);
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+
+        /* Form Groups */
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .form-label {
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: rgba(255,255,255,0.6);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .form-input {
+          width: 100%;
+          padding: 14px 16px;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 10px;
+          color: white;
+          font-size: 1rem;
+          transition: all 0.2s ease;
+          box-sizing: border-box;
+        }
+
+        .form-input:focus {
+          outline: none;
+          border-color: #4CAF50;
+          background: rgba(255, 255, 255, 0.12);
+        }
+
+        .form-input::placeholder {
+          color: rgba(255,255,255,0.3);
+        }
+
+        /* Color Grid */
+        .color-grid {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+
+        .color-btn {
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          border: 2px solid transparent;
           cursor: pointer;
           transition: all 0.2s ease;
-          position: relative;
+          padding: 0;
+          appearance: none;
+          -webkit-appearance: none;
         }
 
-        .color-dot:hover {
-          transform: scale(1.15);
-          box-shadow: 0 0 12px var(--dot-color);
-        }
-
-        .color-dot.active {
+        .color-btn:hover {
           transform: scale(1.1);
-          box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9), 0 0 15px var(--dot-color);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
 
-        .color-custom-wrapper {
-          position: relative;
+        .color-btn.active {
+          border-color: white;
+          box-shadow: 0 0 0 2px rgba(255,255,255,0.3), 0 4px 12px rgba(0,0,0,0.3);
+          transform: scale(1.05);
+        }
+
+        .color-custom {
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          border: 2px dashed rgba(255,255,255,0.3);
+          background: rgba(255,255,255,0.05);
           cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+          transition: all 0.2s ease;
         }
 
-        .color-input-hidden {
+        .color-custom:hover {
+          border-color: rgba(255,255,255,0.5);
+          background: rgba(255,255,255,0.1);
+        }
+
+        .color-custom input {
           position: absolute;
           width: 100%;
           height: 100%;
@@ -1294,83 +1298,53 @@ export default function Home() {
           cursor: pointer;
         }
 
-        .color-custom-btn {
-          width: 28px;
-          height: 28px;
-          border-radius: 50%;
-          border: 2px dashed rgba(255, 255, 255, 0.4);
-          background: rgba(255, 255, 255, 0.1);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 1rem;
-          color: rgba(255, 255, 255, 0.6);
-          transition: all 0.2s ease;
+        .color-custom span {
+          font-size: 1.2rem;
+          color: rgba(255,255,255,0.5);
         }
 
-        .color-custom-wrapper:hover .color-custom-btn {
-          border-color: rgba(255, 255, 255, 0.6);
-          color: white;
-          background: rgba(255, 255, 255, 0.15);
-        }
-
-        /* Skin Section */
-        .skin-section {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .skin-label {
-          font-size: 0.9rem;
-          color: rgba(255, 255, 255, 0.7);
-          text-align: center;
-        }
-
+        /* Skin Grid */
         .skin-grid {
           display: grid;
           grid-template-columns: repeat(5, 1fr);
           gap: 8px;
         }
 
-        .skin-card {
+        .skin-btn {
           display: flex;
           flex-direction: column;
           align-items: center;
           gap: 4px;
-          padding: 10px 6px;
+          padding: 10px 4px;
           background: rgba(255, 255, 255, 0.05);
-          border: 2px solid rgba(255, 255, 255, 0.1);
-          border-radius: 12px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 10px;
           cursor: pointer;
           transition: all 0.2s ease;
         }
 
-        .skin-card:hover {
+        .skin-btn:hover {
           background: rgba(255, 255, 255, 0.1);
-          border-color: rgba(255, 255, 255, 0.2);
           transform: translateY(-2px);
         }
 
-        .skin-card.active {
+        .skin-btn.active {
           background: rgba(76, 175, 80, 0.2);
           border-color: #4CAF50;
-          box-shadow: 0 0 15px rgba(76, 175, 80, 0.3);
         }
 
-        .skin-icon {
-          font-size: 1.5rem;
+        .skin-btn .skin-icon {
+          font-size: 1.3rem;
         }
 
-        .skin-name {
-          font-size: 0.65rem;
-          color: rgba(255, 255, 255, 0.7);
+        .skin-btn .skin-name {
+          font-size: 0.6rem;
+          color: rgba(255,255,255,0.6);
           text-align: center;
         }
 
-        .skin-card.active .skin-name {
+        .skin-btn.active .skin-name {
           color: #4CAF50;
-          font-weight: 600;
         }
 
         /* Play Button */
@@ -1379,37 +1353,38 @@ export default function Home() {
           align-items: center;
           justify-content: center;
           gap: 10px;
-          padding: 16px 32px;
-          background: linear-gradient(135deg, #4CAF50, #45a049);
+          padding: 16px;
+          background: linear-gradient(135deg, #4CAF50, #43A047);
           border: none;
           border-radius: 12px;
           color: white;
-          font-size: 1.1rem;
+          font-size: 1rem;
           font-weight: 700;
           cursor: pointer;
           transition: all 0.3s ease;
           text-transform: uppercase;
           letter-spacing: 0.1em;
+          margin-top: auto;
         }
 
         .play-btn:hover:not(:disabled) {
           transform: translateY(-2px);
-          box-shadow: 0 10px 30px rgba(76, 175, 80, 0.4);
+          box-shadow: 0 8px 25px rgba(76, 175, 80, 0.4);
         }
 
         .play-btn:disabled {
-          background: linear-gradient(135deg, #666, #555);
+          background: linear-gradient(135deg, #555, #444);
           cursor: not-allowed;
         }
 
         .play-icon {
-          font-size: 1.2rem;
+          font-size: 1rem;
         }
 
         .spinner {
-          width: 20px;
-          height: 20px;
-          border: 3px solid rgba(255, 255, 255, 0.3);
+          width: 18px;
+          height: 18px;
+          border: 2px solid rgba(255, 255, 255, 0.3);
           border-top-color: white;
           border-radius: 50%;
           animation: spin 1s linear infinite;
@@ -1419,191 +1394,181 @@ export default function Home() {
           to { transform: rotate(360deg); }
         }
 
-        .error {
-          background: rgba(231, 76, 60, 0.2);
-          border: 1px solid rgba(231, 76, 60, 0.4);
-          padding: 10px 15px;
+        .error-msg {
+          background: rgba(231, 76, 60, 0.15);
+          border: 1px solid rgba(231, 76, 60, 0.3);
+          padding: 10px 14px;
           border-radius: 8px;
           color: #ff6b6b;
           text-align: center;
+          font-size: 0.9rem;
           margin: 0;
         }
 
-        /* ========== INSTRUCTIONS ========== */
-        .instructions {
-          margin-top: 30px;
-          text-align: center;
-          animation: fadeInUp 0.8s ease 0.4s both;
-          max-width: 500px;
-        }
-
-        .instructions h3 {
-          font-size: 1.2rem;
-          margin-bottom: 15px;
-          color: rgba(255, 255, 255, 0.9);
-        }
-
-        .instruction-grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
-        .instruction-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 15px;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 10px;
-          font-size: 0.85rem;
-          color: rgba(255, 255, 255, 0.8);
-        }
-
-        .instruction-icon {
-          font-size: 1.3rem;
-        }
-
-        .food-legend {
-          display: flex;
-          justify-content: center;
-          gap: 20px;
-          padding: 15px;
-          background: rgba(0, 0, 0, 0.2);
-          border-radius: 10px;
-        }
-
-        .food-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 0.9rem;
-        }
-
-        .food-dot {
-          width: 16px;
-          height: 16px;
-          border-radius: 50%;
-        }
-
-        .food-dot.normal { background: #FF6347; }
-        .food-dot.bonus { background: #FFD700; box-shadow: 0 0 8px #FFD700; }
-        .food-dot.super { background: #9932CC; box-shadow: 0 0 8px #9932CC; }
-
         /* ========== LEADERBOARD ========== */
-        .leaderboard-section {
-          width: 100%;
-          max-width: 400px;
-          padding: 20px;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 16px;
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          animation: fadeInUp 0.8s ease 0.5s both;
+        .panel-leaderboard {
+          flex: 1;
         }
 
-        .leaderboard-title {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          font-size: 1.3rem;
-          color: #FFD700;
-          margin: 0 0 15px 0;
-          text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
-        }
-
-        .leaderboard-list {
+        .leaderboard {
+          padding: 15px;
           display: flex;
           flex-direction: column;
           gap: 8px;
         }
 
-        .leaderboard-entry {
+        .lb-row {
           display: flex;
           align-items: center;
           gap: 12px;
-          padding: 10px 15px;
+          padding: 12px 14px;
           background: rgba(0, 0, 0, 0.2);
           border-radius: 10px;
-          transition: all 0.3s ease;
+          transition: all 0.2s ease;
         }
 
-        .leaderboard-entry:hover {
+        .lb-row:hover {
           background: rgba(0, 0, 0, 0.3);
-          transform: translateX(5px);
         }
 
-        .leaderboard-entry.first {
-          background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 215, 0, 0.1));
-          border: 1px solid rgba(255, 215, 0, 0.3);
+        .lb-row.rank-1 {
+          background: linear-gradient(135deg, rgba(255, 215, 0, 0.15), rgba(255, 215, 0, 0.08));
+          border: 1px solid rgba(255, 215, 0, 0.2);
         }
 
-        .leaderboard-entry.second {
-          background: linear-gradient(135deg, rgba(192, 192, 192, 0.2), rgba(192, 192, 192, 0.1));
-          border: 1px solid rgba(192, 192, 192, 0.3);
+        .lb-row.rank-2 {
+          background: linear-gradient(135deg, rgba(192, 192, 192, 0.15), rgba(192, 192, 192, 0.08));
+          border: 1px solid rgba(192, 192, 192, 0.2);
         }
 
-        .leaderboard-entry.third {
-          background: linear-gradient(135deg, rgba(205, 127, 50, 0.2), rgba(205, 127, 50, 0.1));
-          border: 1px solid rgba(205, 127, 50, 0.3);
+        .lb-row.rank-3 {
+          background: linear-gradient(135deg, rgba(205, 127, 50, 0.15), rgba(205, 127, 50, 0.08));
+          border: 1px solid rgba(205, 127, 50, 0.2);
         }
 
-        .entry-rank {
-          font-size: 1.2rem;
-          min-width: 30px;
+        .lb-rank {
+          font-size: 1.1rem;
+          min-width: 28px;
           text-align: center;
         }
 
-        .entry-name {
+        .lb-name {
           flex: 1;
           font-weight: 600;
-          font-size: 0.95rem;
+          font-size: 0.9rem;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
 
-        .entry-skin {
-          font-size: 1.1rem;
+        .lb-skin {
+          font-size: 1rem;
         }
 
-        .entry-score {
+        .lb-score {
           font-weight: 700;
-          font-size: 1rem;
+          font-size: 0.95rem;
           color: #4CAF50;
-          min-width: 50px;
+          min-width: 45px;
           text-align: right;
         }
 
+        .lb-empty {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 30px;
+          color: rgba(255,255,255,0.4);
+          text-align: center;
+        }
+
+        .lb-empty span {
+          font-size: 2.5rem;
+          margin-bottom: 10px;
+        }
+
+        .lb-empty p {
+          margin: 2px 0;
+          font-size: 0.9rem;
+        }
+
         .personal-best {
-          margin-top: 15px;
+          margin-top: 10px;
           padding: 10px;
           text-align: center;
           background: rgba(76, 175, 80, 0.1);
           border-radius: 8px;
           color: rgba(255, 255, 255, 0.7);
-          font-size: 0.9rem;
+          font-size: 0.85rem;
         }
 
         .personal-best strong {
           color: #4CAF50;
+          font-weight: 700;
+        }
+
+        /* ========== RULES ========== */
+        .panel-rules {
+          flex-shrink: 0;
+        }
+
+        .rules-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+          padding: 15px;
+          padding-bottom: 10px;
+        }
+
+        .rule {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 12px;
+          background: rgba(0, 0, 0, 0.15);
+          border-radius: 8px;
+          font-size: 0.8rem;
+          color: rgba(255, 255, 255, 0.8);
+        }
+
+        .rule-icon {
           font-size: 1.1rem;
         }
 
-        /* ========== FOOTER ========== */
-        .footer {
-          margin-top: auto;
-          padding: 20px;
-          text-align: center;
-          color: rgba(255, 255, 255, 0.4);
-          font-size: 0.85rem;
-          animation: fadeInUp 0.8s ease 0.6s both;
+        .food-types {
+          display: flex;
+          justify-content: center;
+          gap: 20px;
+          padding: 12px 15px;
+          background: rgba(0, 0, 0, 0.2);
+          border-top: 1px solid rgba(255,255,255,0.05);
         }
 
-        .footer p {
-          margin: 0;
+        .food-type {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.7);
+        }
+
+        .food-dot {
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+        }
+
+        .food-dot.red { background: #FF6347; }
+        .food-dot.gold { background: #FFD700; box-shadow: 0 0 6px #FFD700; }
+        .food-dot.purple { background: #9932CC; box-shadow: 0 0 6px #9932CC; }
+
+        /* ========== FOOTER ========== */
+        .footer {
+          padding: 20px;
+          text-align: center;
+          color: rgba(255, 255, 255, 0.3);
+          font-size: 0.8rem;
         }
 
         /* ========== GAME WRAPPER ========== */
@@ -1613,6 +1578,8 @@ export default function Home() {
           align-items: center;
           width: 100%;
           max-width: 850px;
+          margin: 0 auto;
+          padding: 20px;
           animation: fadeIn 0.5s ease;
         }
 
@@ -1731,24 +1698,97 @@ export default function Home() {
 
         /* ========== RESPONSIVE ========== */
         @media (max-width: 768px) {
-          .logo-icon { font-size: 3rem; }
-          .title-snake { font-size: 2.5rem; }
-          .title-battle { font-size: 1.5rem; letter-spacing: 0.3em; }
-          .subtitle { font-size: 0.9rem; }
-          .card { padding: 20px; margin: 0 10px; }
-          .instruction-grid { grid-template-columns: 1fr; }
-          .food-legend { flex-direction: column; gap: 10px; }
-          .game-header { flex-direction: column; gap: 10px; }
-          .ctrl-btn { width: 55px; height: 55px; font-size: 1.3rem; }
-          .ctrl-row { gap: 40px; }
+          .landing-container {
+            padding: 15px;
+          }
+
+          .hero {
+            flex-direction: column;
+            gap: 15px;
+            text-align: center;
+          }
+
+          .hero-content {
+            justify-content: center;
+          }
+
+          .content-grid {
+            grid-template-columns: 1fr;
+            gap: 20px;
+          }
+
+          .panel-stack {
+            order: 2;
+          }
+
+          .panel-setup {
+            order: 1;
+          }
+
+          .skin-grid {
+            grid-template-columns: repeat(5, 1fr);
+          }
+
+          .rules-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .game-header {
+            flex-direction: column;
+            gap: 10px;
+          }
+
+          .ctrl-btn {
+            width: 55px;
+            height: 55px;
+            font-size: 1.3rem;
+          }
+
+          .ctrl-row {
+            gap: 40px;
+          }
         }
 
         @media (max-width: 480px) {
-          .main { padding: 10px; }
-          .logo-icon { font-size: 2.5rem; }
-          .title-snake { font-size: 2rem; }
-          .title-battle { font-size: 1.2rem; }
-          .preview-segment { width: 18px; height: 18px; }
+          .logo-icon {
+            font-size: 2rem;
+          }
+
+          .title {
+            font-size: 1.4rem;
+          }
+
+          .preview-segment {
+            width: 22px;
+            height: 22px;
+          }
+
+          .skin-grid {
+            grid-template-columns: repeat(5, 1fr);
+            gap: 6px;
+          }
+
+          .skin-btn {
+            padding: 8px 2px;
+          }
+
+          .skin-btn .skin-icon {
+            font-size: 1.1rem;
+          }
+
+          .skin-btn .skin-name {
+            font-size: 0.55rem;
+          }
+
+          .color-btn {
+            width: 32px;
+            height: 32px;
+          }
+
+          .color-custom {
+            width: 32px;
+            height: 32px;
+          }
         }
       `}</style>
     </div>
