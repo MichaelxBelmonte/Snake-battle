@@ -5,8 +5,16 @@ import { io } from 'socket.io-client';
 // Server URL - Socket.IO server
 const getServerUrl = () => {
   if (typeof window === 'undefined') return 'http://localhost:3001';
-  // Use current hostname for network play
+
   const hostname = window.location.hostname;
+
+  // Production: use Railway server
+  if (hostname.includes('vercel.app') || hostname.includes('snake-battle')) {
+    // Replace with your Railway URL after deployment
+    return process.env.NEXT_PUBLIC_SOCKET_SERVER || 'https://snake-battle-server-production.up.railway.app';
+  }
+
+  // Development: use local server
   return `http://${hostname}:3001`;
 };
 
