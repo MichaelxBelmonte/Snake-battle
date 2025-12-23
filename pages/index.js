@@ -1,417 +1,453 @@
-import { useState, useEffect, useRef } from 'react';
-import Pusher from 'pusher-js';
-import Link from 'next/link';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Head from 'next/head';
+import { io } from 'socket.io-client';
 
-// URL API - punta all'endpoint giusto in base all'ambiente
-const API_BASE_URL = typeof window !== 'undefined' && window.location.hostname.includes('localhost')
-  ? 'http://localhost:30003000'
-  : 'https://snake-battle.vercel.app';
+// Server URL - Socket.IO server
+const getServerUrl = () => {
+  if (typeof window === 'undefined') return 'http://localhost:3001';
+  // Use current hostname for network play
+  const hostname = window.location.hostname;
+  return `http://${hostname}:3001`;
+};
 
-// Funzioni di utilità per i colori
+// Cache per i colori calcolati (memoization)
+const colorCache = new Map();
+
 const darkenColor = (hex, percent) => {
-  // Converte esadecimale in RGB
-  let r = parseInt(hex.substring(1, 3), 16);
-  let g = parseInt(hex.substring(3, 5), 16);
-  let b = parseInt(hex.substring(5, 7), 16);
-  
-  // Applica la percentuale di oscuramento
-  r = Math.floor(r * (100 - percent) / 100);
-  g = Math.floor(g * (100 - percent) / 100);
-  b = Math.floor(b * (100 - percent) / 100);
-  
-  // Converte di nuovo in esadecimale
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-};
+  if (!hex || typeof hex !== 'string') return '#000000';
+  const cacheKey = `${hex}-${percent}`;
+  if (colorCache.has(cacheKey)) return colorCache.get(cacheKey);
 
-// Crea un colore con diversa opacità
-const adjustOpacity = (hex, opacity) => {
-  // Converte esadecimale in RGB
-  let r = parseInt(hex.substring(1, 3), 16);
-  let g = parseInt(hex.substring(3, 5), 16);
-  let b = parseInt(hex.substring(5, 7), 16);
-  
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-};
-
-// Rileva se è un dispositivo mobile
-const isMobileDevice = () => {
-  return (typeof window !== "undefined" && 
-    (navigator.userAgent.match(/Android/i) ||
-     navigator.userAgent.match(/webOS/i) ||
-     navigator.userAgent.match(/iPhone/i) ||
-     navigator.userAgent.match(/iPad/i) ||
-     navigator.userAgent.match(/iPod/i) ||
-     navigator.userAgent.match(/BlackBerry/i) ||
-     navigator.userAgent.match(/Windows Phone/i)));
+  try {
+    let r = parseInt(hex.substring(1, 3), 16);
+    let g = parseInt(hex.substring(3, 5), 16);
+    let b = parseInt(hex.substring(5, 7), 16);
+    r = Math.floor(r * (100 - percent) / 100);
+    g = Math.floor(g * (100 - percent) / 100);
+    b = Math.floor(b * (100 - percent) / 100);
+    const result = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    colorCache.set(cacheKey, result);
+    return result;
+  } catch {
+    return '#000000';
+  }
 };
 
 export default function Home() {
   const [playerName, setPlayerName] = useState('');
   const [playerColor, setPlayerColor] = useState('#4CAF50');
   const [gameStarted, setGameStarted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  
-  // Stati fondamentali ridotti al minimo
-  const [snake, setSnake] = useState([
-    { x: 100, y: 100 },
-    { x: 80, y: 100 },
-    { x: 60, y: 100 }
-  ]);
-  const [food, setFood] = useState([{ x: 300, y: 300 }]);
-  const [direction, setDirection] = useState('right');
-  const [score, setScore] = useState(0);
-  
-  // Riferimenti essenziali
+  const [playerId, setPlayerId] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [latency, setLatency] = useState(0);
+
+  // Game state - received from server
+  const [gameState, setGameState] = useState({ players: [], food: [] });
+
+  // Refs
   const canvasRef = useRef(null);
-  const gameLoopRef = useRef(null);
-  const gridSize = 20; // Dimensione della cella costante
-  
-  // Rilevamento mobile semplificato
+  const gridCanvasRef = useRef(null);
+  const socketRef = useRef(null);
+  const directionRef = useRef('right');
+  const gridSize = 20;
+
+  // Interpolation refs for smooth rendering
+  const prevStateRef = useRef({ players: [], food: [] });
+  const targetStateRef = useRef({ players: [], food: [] });
+  const lastUpdateTimeRef = useRef(Date.now());
+  const interpolationFactorRef = useRef(0);
+
   const [isMobile, setIsMobile] = useState(false);
-  
-  // Rileva dispositivo mobile all'avvio
+
+  // Mobile detection
   useEffect(() => {
-    const checkMobile = () => {
-      return (typeof window !== "undefined" && window.innerWidth < 768);
-    };
-    
+    const checkMobile = () => window.innerWidth < 768;
     setIsMobile(checkMobile());
-    
-    const handleResize = () => {
-      setIsMobile(checkMobile());
-    };
-    
+    const handleResize = () => setIsMobile(checkMobile());
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-  
-  // Gestione input da tastiera - semplificata
+
+  // Keyboard controls - send direction to server
   useEffect(() => {
-    if (!gameStarted) return;
-    
-    console.log('Inizializzazione controlli tastiera');
-    
+    if (!gameStarted || !socketRef.current) return;
+
     const handleKeyPress = (e) => {
-      // Previeni lo scroll della pagina con le frecce
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'].includes(e.key)) {
         e.preventDefault();
       }
-      
-      // Validazione direzione opposta
-      const currentHead = snake[0];
-      const oppositeDirection = {
-        'up': 'down',
-        'down': 'up',
-        'left': 'right',
-        'right': 'left'
+
+      const opposites = { up: 'down', down: 'up', left: 'right', right: 'left' };
+      const keyMap = {
+        ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+        w: 'up', s: 'down', a: 'left', d: 'right',
+        W: 'up', S: 'down', A: 'left', D: 'right'
       };
-      
-      switch (e.key) {
-        case 'ArrowUp':
-          if (direction !== oppositeDirection['up']) {
-            setDirection('up');
-            console.log('Direzione: up');
-          }
-          break;
-        case 'ArrowDown':
-          if (direction !== oppositeDirection['down']) {
-            setDirection('down');
-            console.log('Direzione: down');
-          }
-          break;
-        case 'ArrowLeft':
-          if (direction !== oppositeDirection['left']) {
-            setDirection('left');
-            console.log('Direzione: left');
-          }
-          break;
-        case 'ArrowRight':
-          if (direction !== oppositeDirection['right']) {
-            setDirection('right');
-            console.log('Direzione: right');
-          }
-          break;
+
+      const newDir = keyMap[e.key];
+      if (newDir && directionRef.current !== opposites[newDir]) {
+        directionRef.current = newDir;
+        // Send direction to server - server handles movement
+        socketRef.current.emit('direction', newDir);
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [gameStarted, direction, snake]);
-  
-  // Logica di movimento basilare - completamente indipendente
+  }, [gameStarted]);
+
+  // Create cached grid
   useEffect(() => {
-    if (!gameStarted) return;
-    
-    console.log('Avvio gioco - movimento basilare');
-    
-    // Funzione di movimento
-    const moveSnake = () => {
-      setSnake(prevSnake => {
-        // Clona il serpente attuale
-        const newSnake = [...prevSnake];
-        const head = { ...newSnake[0] };
-        
-        // Calcola la nuova posizione della testa in base alla direzione
-        switch (direction) {
-          case 'up':
-            head.y -= gridSize;
-            break;
-          case 'down':
-            head.y += gridSize;
-            break;
-          case 'left':
-            head.x -= gridSize;
-            break;
-          case 'right':
-            head.x += gridSize;
-            break;
-        }
-        
-        // Wraparound - se il serpente esce dal canvas, rientra dall'altro lato
-        if (head.x < 0) head.x = 780;  // 800 - gridSize
-        if (head.x >= 800) head.x = 0;
-        if (head.y < 0) head.y = 580;  // 600 - gridSize
-        if (head.y >= 600) head.y = 0;
-        
-        // Inserisci la nuova testa all'inizio dell'array
-        newSnake.unshift(head);
-        
-        // Controlla collisione con il cibo
-        let ate = false;
-        food.forEach((foodItem, index) => {
-          if (head.x === foodItem.x && head.y === foodItem.y) {
-            ate = true;
-            
-            // Aumenta il punteggio
-            setScore(prevScore => prevScore + 10);
-            
-            // Genera nuovo cibo in posizione casuale
-            setFood(prevFood => {
-              const newFood = [...prevFood];
-              newFood[index] = {
-                x: Math.floor(Math.random() * (800 / gridSize)) * gridSize,
-                y: Math.floor(Math.random() * (600 / gridSize)) * gridSize
-              };
-              return newFood;
-            });
-          }
-        });
-        
-        // Se non ha mangiato, rimuovi l'ultimo segmento del serpente
-        if (!ate) {
-          newSnake.pop();
-        }
-        
-        // Log della nuova posizione (solo per il debug)
-        console.log(`Movimento: ${direction}, Testa: (${head.x}, ${head.y}), Lunghezza: ${newSnake.length}`);
-        
-        return newSnake;
-      });
-    };
-    
-    // Imposta un intervallo per il movimento
-    const gameInterval = setInterval(moveSnake, 200); // 5 movimenti al secondo
-    gameLoopRef.current = gameInterval;
-    
-    return () => {
-      // Pulisci l'intervallo quando il componente viene smontato
-      if (gameLoopRef.current) {
-        clearInterval(gameLoopRef.current);
-      }
-    };
-  }, [gameStarted, direction, food]);
-  
-  // Rendering basilare - completamente indipendente
+    const gridCanvas = document.createElement('canvas');
+    gridCanvas.width = 800;
+    gridCanvas.height = 600;
+    const gridCtx = gridCanvas.getContext('2d');
+
+    gridCtx.fillStyle = '#121212';
+    gridCtx.fillRect(0, 0, 800, 600);
+
+    gridCtx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    gridCtx.lineWidth = 0.5;
+    gridCtx.beginPath();
+    for (let y = 0; y <= 600; y += gridSize) {
+      gridCtx.moveTo(0, y);
+      gridCtx.lineTo(800, y);
+    }
+    for (let x = 0; x <= 800; x += gridSize) {
+      gridCtx.moveTo(x, 0);
+      gridCtx.lineTo(x, 600);
+    }
+    gridCtx.stroke();
+
+    gridCanvasRef.current = gridCanvas;
+  }, []);
+
+  // Interpolation helper function
+  const lerp = (start, end, t) => start + (end - start) * t;
+
+  // Rendering loop with interpolation
   useEffect(() => {
     if (!gameStarted || !canvasRef.current) return;
-    
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    
+    const SERVER_TICK = 50; // Must match server tick rate
+
     const draw = () => {
-      // Pulisci il canvas
-      ctx.fillStyle = '#121212';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Disegna la griglia (molto leggera)
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-      ctx.lineWidth = 0.5;
-      
-      // Griglia orizzontale
-      for (let y = 0; y <= canvas.height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
+      // Calculate interpolation factor (0 to 1)
+      const elapsed = Date.now() - lastUpdateTimeRef.current;
+      const t = Math.min(elapsed / SERVER_TICK, 1);
+
+      // Draw cached grid
+      if (gridCanvasRef.current) {
+        ctx.drawImage(gridCanvasRef.current, 0, 0);
+      } else {
+        ctx.fillStyle = '#121212';
+        ctx.fillRect(0, 0, 800, 600);
       }
-      
-      // Griglia verticale
-      for (let x = 0; x <= canvas.width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-      
-      // Disegna il serpente
-      snake.forEach((segment, index) => {
-        // La testa è di colore diverso
-        if (index === 0) {
-          ctx.fillStyle = '#FFFFFF'; // Bianco per il contorno
-          ctx.fillRect(segment.x - 2, segment.y - 2, gridSize + 4, gridSize + 4);
-          ctx.fillStyle = playerColor; // Colore scelto dal giocatore
-        } else {
-          ctx.fillStyle = darkenColor(playerColor, index * 5); // Ogni segmento è più scuro
-        }
-        
-        ctx.fillRect(segment.x, segment.y, gridSize - 1, gridSize - 1);
-        
-        // Disegna gli occhi sulla testa
-        if (index === 0) {
-          ctx.fillStyle = '#000000';
-          
-          // Posiziona gli occhi in base alla direzione
-          let eyeX1, eyeY1, eyeX2, eyeY2;
-          
-          switch (direction) {
-            case 'up':
-              eyeX1 = segment.x + gridSize * 0.25;
-              eyeY1 = segment.y + gridSize * 0.25;
-              eyeX2 = segment.x + gridSize * 0.75;
-              eyeY2 = segment.y + gridSize * 0.25;
-              break;
-            case 'down':
-              eyeX1 = segment.x + gridSize * 0.25;
-              eyeY1 = segment.y + gridSize * 0.75;
-              eyeX2 = segment.x + gridSize * 0.75;
-              eyeY2 = segment.y + gridSize * 0.75;
-              break;
-            case 'left':
-              eyeX1 = segment.x + gridSize * 0.25;
-              eyeY1 = segment.y + gridSize * 0.25;
-              eyeX2 = segment.x + gridSize * 0.25;
-              eyeY2 = segment.y + gridSize * 0.75;
-              break;
-            case 'right':
-              eyeX1 = segment.x + gridSize * 0.75;
-              eyeY1 = segment.y + gridSize * 0.25;
-              eyeX2 = segment.x + gridSize * 0.75;
-              eyeY2 = segment.y + gridSize * 0.75;
-              break;
+
+      // Draw all players with interpolation
+      const currentPlayers = targetStateRef.current.players || [];
+      const prevPlayers = prevStateRef.current.players || [];
+
+      currentPlayers.forEach(player => {
+        const playerSnake = player.snake || [];
+        if (playerSnake.length === 0) return;
+
+        const isMe = player.id === playerId;
+        const pColor = player.color || '#888888';
+
+        // Find previous state for this player
+        const prevPlayer = prevPlayers.find(p => p.id === player.id);
+        const prevSnake = prevPlayer?.snake || playerSnake;
+
+        // Draw snake segments with interpolation
+        playerSnake.forEach((segment, index) => {
+          // Interpolate position if we have previous data
+          let drawX = segment.x;
+          let drawY = segment.y;
+
+          if (prevSnake[index] && !isMe) {
+            // Only interpolate other players (own snake should be responsive)
+            const prevSeg = prevSnake[index];
+            // Handle wraparound - don't interpolate across screen edges
+            const dx = Math.abs(segment.x - prevSeg.x);
+            const dy = Math.abs(segment.y - prevSeg.y);
+            if (dx < 100 && dy < 100) {
+              drawX = lerp(prevSeg.x, segment.x, t);
+              drawY = lerp(prevSeg.y, segment.y, t);
+            }
           }
-          
-          ctx.beginPath();
-          ctx.arc(eyeX1, eyeY1, 3, 0, Math.PI * 2);
-          ctx.arc(eyeX2, eyeY2, 3, 0, Math.PI * 2);
-          ctx.fill();
+
+          if (index === 0) {
+            // Head with border (thicker for own snake)
+            ctx.fillStyle = '#FFFFFF';
+            const border = isMe ? 2 : 1;
+            ctx.fillRect(drawX - border, drawY - border, gridSize + border * 2, gridSize + border * 2);
+            ctx.fillStyle = pColor;
+          } else {
+            ctx.fillStyle = darkenColor(pColor, index * 5);
+          }
+          ctx.fillRect(drawX, drawY, gridSize - 1, gridSize - 1);
+
+          // Eyes on head (only for own snake)
+          if (index === 0 && isMe) {
+            ctx.fillStyle = '#000000';
+            let eyeX1, eyeY1, eyeX2, eyeY2;
+            const dir = player.direction || 'right';
+
+            switch (dir) {
+              case 'up':
+                eyeX1 = drawX + gridSize * 0.25; eyeY1 = drawY + gridSize * 0.25;
+                eyeX2 = drawX + gridSize * 0.75; eyeY2 = drawY + gridSize * 0.25;
+                break;
+              case 'down':
+                eyeX1 = drawX + gridSize * 0.25; eyeY1 = drawY + gridSize * 0.75;
+                eyeX2 = drawX + gridSize * 0.75; eyeY2 = drawY + gridSize * 0.75;
+                break;
+              case 'left':
+                eyeX1 = drawX + gridSize * 0.25; eyeY1 = drawY + gridSize * 0.25;
+                eyeX2 = drawX + gridSize * 0.25; eyeY2 = drawY + gridSize * 0.75;
+                break;
+              default: // right
+                eyeX1 = drawX + gridSize * 0.75; eyeY1 = drawY + gridSize * 0.25;
+                eyeX2 = drawX + gridSize * 0.75; eyeY2 = drawY + gridSize * 0.75;
+            }
+
+            ctx.beginPath();
+            ctx.arc(eyeX1, eyeY1, 3, 0, Math.PI * 2);
+            ctx.arc(eyeX2, eyeY2, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        });
+
+        // Draw name above head
+        const head = playerSnake[0];
+        const prevHead = prevSnake[0] || head;
+        let nameX = head.x;
+        let nameY = head.y;
+        if (!isMe && Math.abs(head.x - prevHead.x) < 100) {
+          nameX = lerp(prevHead.x, head.x, t);
+          nameY = lerp(prevHead.y, head.y, t);
         }
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = isMe ? 'bold 14px Arial' : 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(player.name || 'Player', nameX + gridSize/2, nameY - 8);
       });
-      
-      // Disegna il cibo
-      ctx.fillStyle = '#FF6347'; // Rosso per il cibo
-      food.forEach(foodItem => {
+
+      // Draw food
+      const currentFood = targetStateRef.current.food || [];
+      ctx.fillStyle = '#FF6347';
+      currentFood.forEach(foodItem => {
         ctx.beginPath();
-        ctx.arc(
-          foodItem.x + gridSize / 2,
-          foodItem.y + gridSize / 2,
-          gridSize / 2,
-          0,
-          Math.PI * 2
-        );
+        ctx.arc(foodItem.x + gridSize/2, foodItem.y + gridSize/2, gridSize/2, 0, Math.PI * 2);
         ctx.fill();
-        
-        // Aggiungi un piccolo riflesso per effetto 3D
+
         ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
-        ctx.arc(
-          foodItem.x + gridSize / 3,
-          foodItem.y + gridSize / 3,
-          gridSize / 6,
-          0,
-          Math.PI * 2
-        );
+        ctx.arc(foodItem.x + gridSize/3, foodItem.y + gridSize/3, gridSize/6, 0, Math.PI * 2);
         ctx.fill();
-        
         ctx.fillStyle = '#FF6347';
       });
-      
-      // Disegna il punteggio
+
+      // Draw UI - Scores
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 20px Arial';
+      ctx.font = 'bold 16px Arial';
       ctx.textAlign = 'left';
-      ctx.fillText(`Punteggio: ${score}`, 20, 30);
-      
-      // Disegna direzione attuale (per debug)
+
+      // Find my score
+      const myPlayer = gameState.players.find(p => p.id === playerId);
+      const myScore = myPlayer?.score || 0;
+      ctx.fillText(`${playerName}: ${myScore}`, 20, 25);
+
+      // Show player count
       ctx.textAlign = 'right';
-      ctx.fillText(`Direzione: ${direction}`, canvas.width - 20, 30);
-      
-      // Richiedi il prossimo frame
+      ctx.fillText(`Giocatori: ${gameState.players.length}`, 780, 25);
+
+      // Show latency
+      ctx.font = '12px Arial';
+      ctx.fillText(`Ping: ${latency}ms`, 780, 45);
+
+      // Connection status indicator
+      ctx.fillStyle = connectionStatus === 'connected' ? '#00FF00' : '#FF0000';
+      ctx.beginPath();
+      ctx.arc(770, 60, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Leaderboard
+      const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score).slice(0, 5);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(5, 560, 150, sortedPlayers.length * 18 + 25);
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText('Classifica:', 10, 575);
+
+      ctx.font = '11px Arial';
+      sortedPlayers.forEach((p, i) => {
+        const displayName = p.name.length > 10 ? p.name.substring(0, 10) + '...' : p.name;
+        ctx.fillStyle = p.id === playerId ? '#FFD700' : '#FFFFFF';
+        ctx.fillText(`${i + 1}. ${displayName}: ${p.score}`, 10, 590 + i * 15);
+      });
+
       requestAnimationFrame(draw);
     };
-    
-    // Avvia il loop di disegno
+
     const animationId = requestAnimationFrame(draw);
-    
-    return () => {
-      cancelAnimationFrame(animationId);
+    return () => cancelAnimationFrame(animationId);
+  }, [gameStarted, gameState, playerId, playerName, latency, connectionStatus]);
+
+  // Latency measurement
+  useEffect(() => {
+    if (!socketRef.current || connectionStatus !== 'connected') return;
+
+    const measureLatency = () => {
+      const start = Date.now();
+      socketRef.current.emit('ping', start);
     };
-  }, [gameStarted, snake, food, direction, score, playerColor]);
-  
-  // Funzione per avviare una nuova partita
-  const handleStartGame = (e) => {
+
+    const interval = setInterval(measureLatency, 2000);
+    return () => clearInterval(interval);
+  }, [connectionStatus]);
+
+  // Start game - connect to Socket.IO server
+  const handleStartGame = async (e) => {
     e.preventDefault();
-    
+
     if (!playerName) {
       setError('Inserisci il tuo nome');
       return;
     }
-    
-    // Imposta le dimensioni del canvas
-    if (canvasRef.current) {
-      canvasRef.current.width = 800;
-      canvasRef.current.height = 600;
+
+    if (isLoading) return;
+
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const serverUrl = getServerUrl();
+      console.log('Connecting to:', serverUrl);
+
+      // Connect to Socket.IO server
+      const socket = io(serverUrl, {
+        transports: ['websocket', 'polling'],
+        timeout: 10000,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
+
+      socketRef.current = socket;
+
+      socket.on('connect', () => {
+        console.log('Connected to server:', socket.id);
+        setConnectionStatus('connected');
+
+        // Join the game
+        socket.emit('join', {
+          name: playerName,
+          color: playerColor
+        });
+      });
+
+      socket.on('joined', (data) => {
+        console.log('Joined game:', data);
+        setPlayerId(data.id);
+        setGameStarted(true);
+        setIsLoading(false);
+      });
+
+      socket.on('gameState', (state) => {
+        // Store previous state for interpolation
+        prevStateRef.current = targetStateRef.current;
+        targetStateRef.current = state;
+        lastUpdateTimeRef.current = Date.now();
+        interpolationFactorRef.current = 0;
+
+        setGameState(state);
+
+        // Update direction ref from server state
+        const myPlayer = state.players.find(p => p.id === playerId);
+        if (myPlayer) {
+          directionRef.current = myPlayer.direction;
+        }
+      });
+
+      socket.on('pong', (startTime) => {
+        const lat = Date.now() - startTime;
+        setLatency(lat);
+      });
+
+      socket.on('playerLeft', (leftPlayerId) => {
+        console.log('Player left:', leftPlayerId);
+      });
+
+      socket.on('connect_error', (err) => {
+        console.error('Connection error:', err);
+        setError(`Errore di connessione: ${err.message}`);
+        setConnectionStatus('error');
+        setIsLoading(false);
+      });
+
+      socket.on('disconnect', (reason) => {
+        console.log('Disconnected:', reason);
+        setConnectionStatus('disconnected');
+        if (reason === 'io server disconnect') {
+          // Server disconnected, try to reconnect
+          socket.connect();
+        }
+      });
+
+      // Canvas setup
+      if (canvasRef.current) {
+        canvasRef.current.width = 800;
+        canvasRef.current.height = 600;
+      }
+
+    } catch (err) {
+      console.error('Error connecting:', err);
+      setError('Errore di connessione al server');
+      setIsLoading(false);
     }
-    
-    // Genera cibo in posizione casuale
-    setFood([{
-      x: Math.floor(Math.random() * (800 / gridSize)) * gridSize,
-      y: Math.floor(Math.random() * (600 / gridSize)) * gridSize
-    }]);
-    
-    // Reimposta il serpente nella posizione iniziale
-    setSnake([
-      { x: 100, y: 100 },
-      { x: 80, y: 100 },
-      { x: 60, y: 100 }
-    ]);
-    
-    // Reimposta direzione e punteggio
-    setDirection('right');
-    setScore(0);
-    
-    // Avvia il gioco
-    setGameStarted(true);
-    console.log('Gioco avviato!');
   };
-  
+
+  // Handle direction change for mobile
+  const handleMobileDirection = (newDir) => {
+    if (!socketRef.current) return;
+
+    const opposites = { up: 'down', down: 'up', left: 'right', right: 'left' };
+    if (directionRef.current !== opposites[newDir]) {
+      directionRef.current = newDir;
+      socketRef.current.emit('direction', newDir);
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, []);
+
   return (
     <div className="container">
       <Head>
-        <title>Snake Battle</title>
+        <title>Snake Battle - Multiplayer</title>
         <meta name="description" content="Snake Multiplayer Battle" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <link rel="icon" href="/favicon.ico" />
       </Head>
 
       <main className="main">
         <h1 className="title">Snake Battle</h1>
-        
+
         {!gameStarted ? (
           <div className="loginContainer">
-            <a href="/snake.html" className="snakeLink">
-              <button>Gioca a Snake (versione offline)</button>
-            </a>
             <form onSubmit={handleStartGame} className="loginForm">
               <div className="form-group">
                 <label htmlFor="name">Nome:</label>
@@ -422,9 +458,10 @@ export default function Home() {
                   onChange={(e) => setPlayerName(e.target.value)}
                   required
                   placeholder="Inserisci il tuo nome"
+                  maxLength={20}
                 />
               </div>
-              
+
               <div className="form-group">
                 <label htmlFor="color">Colore:</label>
                 <input
@@ -434,28 +471,33 @@ export default function Home() {
                   onChange={(e) => setPlayerColor(e.target.value)}
                 />
               </div>
-              
-              <button type="submit">Inizia Partita</button>
-              
+
+              <button type="submit" disabled={isLoading}>
+                {isLoading ? 'Connessione...' : 'Gioca Online'}
+              </button>
+
               {error && <p className="error">{error}</p>}
             </form>
-            
+
             <div className="instructions-card">
               <h2>Come giocare</h2>
               <ul>
-                <li>Usa le <strong>frecce direzionali</strong> per muovere il serpente</li>
-                <li>Raccogli il <strong>cibo</strong> per crescere e aumentare il punteggio</li>
-                <li>Evita di colpire il tuo serpente o i bordi</li>
-                <li>Versione semplificata (solo locale)</li>
+                <li>Usa le <strong>frecce direzionali</strong> o <strong>WASD</strong> per muovere</li>
+                <li>Raccogli il <strong>cibo</strong> per crescere (+10 punti)</li>
+                <li>Evita di collidere con te stesso o altri giocatori</li>
+                <li>Se colpisci un altro giocatore, lui guadagna 50 punti!</li>
               </ul>
+              <p className="server-info" suppressHydrationWarning>
+                Server: {typeof window !== 'undefined' ? getServerUrl() : ''}
+              </p>
             </div>
           </div>
         ) : (
           <div className="game-container">
-            <canvas 
-              ref={canvasRef} 
-              width="800" 
-              height="600" 
+            <canvas
+              ref={canvasRef}
+              width="800"
+              height="600"
               style={{
                 display: 'block',
                 margin: '0 auto',
@@ -466,28 +508,25 @@ export default function Home() {
                 height: 'auto'
               }}
             />
-            
+
             {isMobile && (
               <div className="mobile-controls">
-                <div className="control-button up" onClick={() => direction !== 'down' && setDirection('up')}>▲</div>
+                <div className="control-button up" onClick={() => handleMobileDirection('up')}>▲</div>
                 <div className="controls-row">
-                  <div className="control-button left" onClick={() => direction !== 'right' && setDirection('left')}>◄</div>
-                  <div className="control-button right" onClick={() => direction !== 'left' && setDirection('right')}>►</div>
+                  <div className="control-button left" onClick={() => handleMobileDirection('left')}>◀</div>
+                  <div className="control-button right" onClick={() => handleMobileDirection('right')}>▶</div>
                 </div>
-                <div className="control-button down" onClick={() => direction !== 'up' && setDirection('down')}>▼</div>
+                <div className="control-button down" onClick={() => handleMobileDirection('down')}>▼</div>
               </div>
             )}
-            
-            <button 
-              className="restart-button"
-              onClick={() => setGameStarted(false)}
-            >
-              Ricomincia
+
+            <button className="restart-button" onClick={() => window.location.reload()}>
+              Esci
             </button>
           </div>
         )}
       </main>
-      
+
       <style jsx>{`
         .container {
           display: flex;
@@ -499,7 +538,7 @@ export default function Home() {
           color: white;
           font-family: Arial, sans-serif;
         }
-        
+
         h1 {
           margin-bottom: 20px;
           font-size: 2.5rem;
@@ -508,7 +547,7 @@ export default function Home() {
           -webkit-text-fill-color: transparent;
           text-align: center;
         }
-        
+
         .loginContainer {
           display: flex;
           flex-direction: column;
@@ -521,31 +560,31 @@ export default function Home() {
           border-radius: 10px;
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
-        
+
         form {
           display: flex;
           flex-direction: column;
           width: 100%;
           gap: 15px;
         }
-        
+
         .form-group {
           display: flex;
           flex-direction: column;
           gap: 5px;
         }
-        
+
         label {
           font-weight: bold;
         }
-        
+
         input {
           padding: 10px;
           border-radius: 4px;
           border: 1px solid #ccc;
           font-size: 16px;
         }
-        
+
         button {
           padding: 12px;
           background-color: #3498db;
@@ -556,35 +595,48 @@ export default function Home() {
           cursor: pointer;
           transition: background-color 0.2s;
         }
-        
+
         button:hover {
           background-color: #2980b9;
         }
-        
+
+        button:disabled {
+          background-color: #7f8c8d;
+          cursor: not-allowed;
+        }
+
         .error {
           color: #e74c3c;
           font-weight: bold;
         }
-        
+
         .instructions-card {
           width: 100%;
           padding: 15px;
           background-color: #34495e;
           border-radius: 8px;
         }
-        
+
         .instructions-card h2 {
           margin-top: 0;
           margin-bottom: 10px;
           color: #3498db;
         }
-        
+
         .instructions-card ul {
           margin: 0;
           padding-left: 20px;
-          line-height: 1.5;
+          line-height: 1.6;
         }
-        
+
+        .server-info {
+          margin-top: 15px;
+          padding-top: 10px;
+          border-top: 1px solid #4a6278;
+          font-size: 12px;
+          color: #95a5a6;
+        }
+
         .game-container {
           display: flex;
           flex-direction: column;
@@ -594,19 +646,19 @@ export default function Home() {
           width: 100%;
           max-width: 840px;
         }
-        
+
         .mobile-controls {
           display: flex;
           flex-direction: column;
           align-items: center;
           margin-top: 20px;
         }
-        
+
         .controls-row {
           display: flex;
           gap: 50px;
         }
-        
+
         .control-button {
           width: 60px;
           height: 60px;
@@ -621,33 +673,29 @@ export default function Home() {
           user-select: none;
           cursor: pointer;
         }
-        
+
         .control-button:active {
           background-color: rgba(255, 255, 255, 0.3);
         }
-        
+
         .restart-button {
           margin-top: 20px;
           background-color: #e74c3c;
         }
-        
+
         .restart-button:hover {
           background-color: #c0392b;
         }
-        
+
         @media (max-width: 768px) {
           .container {
             padding: 10px;
           }
-          
+
           h1 {
             font-size: 2rem;
           }
-          
-          .game-container {
-            margin-top: 10px;
-          }
-          
+
           .control-button {
             width: 50px;
             height: 50px;
@@ -657,4 +705,4 @@ export default function Home() {
       `}</style>
     </div>
   );
-} 
+}

@@ -1,5 +1,5 @@
 import Pusher from 'pusher';
-import { players, foodItems, lastActivity } from './shared-state.js';
+import { players, foodItems, lastActivity, gameConfig, removePlayer } from './shared-state.js';
 
 // Memorizza le ultime connessioni
 const activeConnections = new Map();
@@ -16,84 +16,104 @@ const pusher = new Pusher({
 // Sistema di pulizia automatica dei giocatori inattivi
 setInterval(() => {
   const now = Date.now();
-  const inactiveTimeout = 10000; // 10 secondi (più aggressivo per mantenere il gioco pulito)
+  const inactiveTimeout = gameConfig.inactiveTimeout; // 5 secondi
   let removedPlayers = false;
-  
+
   // Verifica e rimuovi giocatori inattivi
   Object.keys(lastActivity).forEach(id => {
     if (now - lastActivity[id] > inactiveTimeout) {
       console.log(`Rimozione giocatore inattivo: ${id}`);
-      delete players[id];
-      delete lastActivity[id];
+      removePlayer(id);
       activeConnections.delete(id);
       removedPlayers = true;
     }
   });
-  
+
   // Notifica tutti i giocatori se sono state fatte rimozioni
   if (removedPlayers) {
-    try {
-      const activePlayers = Object.values(players);
-      pusher.trigger('snake-game', 'player-moved', {
-        playerId: 'system',
-        otherPlayers: activePlayers,
-        foodItems
-      }).catch(err => console.error('Errore pulizia giocatori:', err));
-    } catch (error) {
-      console.error('Errore durante notifica rimozione giocatori:', error);
-    }
-  }
-}, 10000); // Esegui ogni 10 secondi
+    const activePlayers = Object.values(players).map(p => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      score: p.score,
+      snake: p.snake?.slice(0, 15) || [],
+      direction: p.direction
+    }));
 
-// Funzione per gestire le collisioni con il cibo
+    pusher.trigger('snake-game', 'players-updated', {
+      players: activePlayers,
+      foodItems
+    }).catch(() => {});
+  }
+}, 3000); // Controlla ogni 3 secondi
+
+// Funzione per gestire le collisioni con il cibo (ottimizzata - no sqrt)
 function checkFoodCollision(head, gridSize = 20) {
   let scoreIncreased = false;
   let foodIndex = -1;
-  
-  // Verifica collisione con il cibo (usa threshold più accurato)
+
+  // Pre-calcola il threshold al quadrato (evita sqrt ogni iterazione)
+  const thresholdSq = (gridSize / 2) * (gridSize / 2);
+
+  // Verifica collisione con il cibo usando distanza al quadrato
   for (let i = 0; i < foodItems.length; i++) {
     const food = foodItems[i];
-    const distance = Math.sqrt(
-      Math.pow(head.x - food.x, 2) + 
-      Math.pow(head.y - food.y, 2)
-    );
-    
-    // Se la distanza è minore del raggio del serpente, c'è collisione
-    if (distance < gridSize / 2) {
+    const dx = head.x - food.x;
+    const dy = head.y - food.y;
+    const distSq = dx * dx + dy * dy;
+
+    // Confronta distanze al quadrato (evita Math.sqrt costoso)
+    if (distSq < thresholdSq) {
       scoreIncreased = true;
       foodIndex = i;
       break;
     }
   }
-  
+
   return { scoreIncreased, foodIndex };
 }
 
-// Funzione per generare nuove posizioni del cibo
+// Funzione per generare nuove posizioni del cibo (iterativa - no ricorsione)
 function generateNewFoodPosition(gridSize = 20) {
-  const newX = Math.floor(Math.random() * 40) * gridSize;
-  const newY = Math.floor(Math.random() * 30) * gridSize;
-  
-  // Verifica se la posizione è troppo vicina a un giocatore
-  const isTooClose = Object.values(players).some(player => {
-    if (!player.snake || player.snake.length === 0) return false;
-    
-    // Controlla la distanza dalla testa di ogni serpente
-    return player.snake.some(segment => {
-      const distance = Math.sqrt(
-        Math.pow(segment.x - newX, 2) + 
-        Math.pow(segment.y - newY, 2)
-      );
-      return distance < gridSize * 2;
-    });
-  });
-  
-  // Se troppo vicino, genera una nuova posizione
-  if (isTooClose) {
-    return generateNewFoodPosition(gridSize);
+  const maxAttempts = 100; // Previene loop infiniti
+  const minDistSq = (gridSize * 2) * (gridSize * 2); // Distanza minima al quadrato
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const newX = Math.floor(Math.random() * 40) * gridSize;
+    const newY = Math.floor(Math.random() * 30) * gridSize;
+
+    // Verifica se la posizione è troppo vicina a un giocatore
+    let isTooClose = false;
+
+    for (const player of Object.values(players)) {
+      if (!player.snake || player.snake.length === 0) continue;
+
+      // Controlla solo i primi 5 segmenti per performance
+      const segmentsToCheck = Math.min(player.snake.length, 5);
+      for (let i = 0; i < segmentsToCheck; i++) {
+        const segment = player.snake[i];
+        const dx = segment.x - newX;
+        const dy = segment.y - newY;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < minDistSq) {
+          isTooClose = true;
+          break;
+        }
+      }
+      if (isTooClose) break;
+    }
+
+    if (!isTooClose) {
+      return { x: newX, y: newY };
+    }
   }
-  
-  return { x: newX, y: newY };
+
+  // Fallback: posizione casuale anche se vicina a un giocatore
+  return {
+    x: Math.floor(Math.random() * 40) * gridSize,
+    y: Math.floor(Math.random() * 30) * gridSize
+  };
 }
 
 // Funzione di invio sicuro via Pusher con retry
@@ -138,14 +158,14 @@ export default async function handler(req, res) {
     connection.lastSeen = Date.now();
     connection.requests++;
     
-    // Limita frequenza richieste (massimo 10 al secondo)
-    if (connection.requests > 10) {
+    // Limita frequenza richieste (massimo 20 al secondo - più permissivo)
+    if (connection.requests > 20) {
       const elapsed = connection.lastSeen - connection.firstSeen;
       if (elapsed < 1000) {
-        console.warn(`Troppe richieste da ${playerId}: ${connection.requests} in ${elapsed}ms`);
+        // Non loggare per evitare spam, solo resetta
         connection.requests = 0;
         connection.firstSeen = Date.now();
-        return res.status(429).json({ message: 'Troppe richieste, rallenta' });
+        return res.status(429).json({ message: 'Troppe richieste' });
       }
       connection.requests = 0;
       connection.firstSeen = Date.now();
@@ -156,7 +176,7 @@ export default async function handler(req, res) {
     
     // Ottieni parametri
     const gridSize = 20;
-    const { headPos, length, name, color, score } = playerState;
+    const { headPos, name, color, score } = playerState;
     
     // Trova o crea uno stato per questo giocatore
     let player = players[playerId];
@@ -207,47 +227,46 @@ export default async function handler(req, res) {
     // Aggiorna lo stato del giocatore nel server
     players[playerId] = player;
     
-    // Ottieni tutti gli altri giocatori
-    const otherPlayers = Object.values(players)
-      .filter(p => p.id !== playerId)
-      // Assicurati che i dati siano validi per evitare errori
+    // Ottieni tutti gli altri giocatori - con snake completo (primi 15 segmenti)
+    const otherPlayersData = Object.values(players)
+      .filter(p => p.id !== playerId && p.snake && p.snake.length > 0)
       .map(p => ({
         id: p.id,
         name: p.name || 'Giocatore',
         color: p.color || '#00ff00',
         score: p.score || 0,
-        snake: p.snake || [],
+        snake: p.snake.slice(0, 15), // Primi 15 segmenti
         direction: p.direction || 'right'
       }));
-    
-    // Limita la dimensione dei dati inviati
-    const compactOtherPlayers = otherPlayers.map(p => ({
-      id: p.id,
-      name: p.name,
-      color: p.color,
-      score: p.score,
-      // Invia solo i primi 10 segmenti per ridurre dimensione dati
-      snake: p.snake.slice(0, 10),
-      direction: p.direction
-    }));
-    
+
+    // Formato del player per broadcast (con snake completo)
+    const playerData = {
+      id: player.id,
+      name: player.name,
+      color: player.color,
+      score: player.score,
+      snake: player.snake.slice(0, 15),
+      direction: player.direction
+    };
+
     // Invia notifica tramite Pusher a tutti gli altri client
     const pusherSuccess = await safePusherTrigger('snake-game', 'player-moved', {
       playerId,
-      player,
+      player: playerData,
       foodItems,
-      otherPlayers: compactOtherPlayers
+      otherPlayers: otherPlayersData
     });
-    
+
     if (!pusherSuccess) {
       console.warn(`Impossibile inviare notifica Pusher per ${playerId}`);
     }
-    
+
     // Rispondi al client
     return res.status(200).json({
-      player,
+      player: playerData,
       foodItems,
-      otherPlayers: compactOtherPlayers
+      otherPlayers: otherPlayersData,
+      serverScore: player.score // Score dal server
     });
   } catch (error) {
     console.error('Errore:', error);

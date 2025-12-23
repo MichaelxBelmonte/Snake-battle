@@ -3,185 +3,291 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// Configurazione base
+// Configurazione
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 3000;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const PORT = process.env.PORT || 3001;
+
+// Costanti di gioco
+const GRID_SIZE = 20;
+const GAME_WIDTH = 800;
+const GAME_HEIGHT = 600;
+const TICK_RATE = 50; // ms - il server aggiorna ogni 50ms (20 FPS)
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Socket.io setup
+// Socket.IO con CORS aperto per sviluppo
 const io = new Server(server, {
   cors: {
-    origin: CORS_ORIGIN,
-    methods: ["GET", "POST"],
-    credentials: true
-  }
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  pingTimeout: 10000,
+  pingInterval: 5000
 });
 
-// Stato del gioco
+// ==================== GAME STATE ====================
 const gameState = {
   players: {},
-  foodItems: []
+  food: []
 };
 
-// Dimensioni del campo di gioco
-const GRID_SIZE = 20;
-const GAME_WIDTH = 800;
-const GAME_HEIGHT = 600;
-
 // Genera posizione casuale sulla griglia
-const generateRandomPosition = () => {
+function randomPosition() {
   return {
     x: Math.floor(Math.random() * (GAME_WIDTH / GRID_SIZE)) * GRID_SIZE,
     y: Math.floor(Math.random() * (GAME_HEIGHT / GRID_SIZE)) * GRID_SIZE
   };
-};
-
-// Genera cibo all'inizio
-for (let i = 0; i < 5; i++) {
-  gameState.foodItems.push(generateRandomPosition());
 }
 
-// Gestione connessioni Socket.io
+// Genera posizione iniziale per nuovo serpente (evita sovrapposizioni)
+function generateSpawnPosition() {
+  const margin = GRID_SIZE * 5;
+  return {
+    x: margin + Math.floor(Math.random() * ((GAME_WIDTH - margin * 2) / GRID_SIZE)) * GRID_SIZE,
+    y: margin + Math.floor(Math.random() * ((GAME_HEIGHT - margin * 2) / GRID_SIZE)) * GRID_SIZE
+  };
+}
+
+// Inizializza cibo
+function initFood() {
+  gameState.food = [];
+  for (let i = 0; i < 5; i++) {
+    gameState.food.push(randomPosition());
+  }
+}
+
+// Muovi un serpente in base alla direzione
+function moveSnake(player) {
+  if (!player.snake || player.snake.length === 0) return;
+
+  const head = { ...player.snake[0] };
+
+  // Muovi in base alla direzione
+  switch (player.direction) {
+    case 'up': head.y -= GRID_SIZE; break;
+    case 'down': head.y += GRID_SIZE; break;
+    case 'left': head.x -= GRID_SIZE; break;
+    case 'right': head.x += GRID_SIZE; break;
+  }
+
+  // Wraparound
+  if (head.x < 0) head.x = GAME_WIDTH - GRID_SIZE;
+  if (head.x >= GAME_WIDTH) head.x = 0;
+  if (head.y < 0) head.y = GAME_HEIGHT - GRID_SIZE;
+  if (head.y >= GAME_HEIGHT) head.y = 0;
+
+  // Aggiungi nuova testa
+  player.snake.unshift(head);
+
+  // Controlla collisione con cibo
+  let ate = false;
+  for (let i = 0; i < gameState.food.length; i++) {
+    const food = gameState.food[i];
+    if (head.x === food.x && head.y === food.y) {
+      ate = true;
+      player.score += 10;
+      // Rigenera il cibo in nuova posizione
+      gameState.food[i] = randomPosition();
+      break;
+    }
+  }
+
+  // Se non ha mangiato, rimuovi la coda
+  if (!ate) {
+    player.snake.pop();
+  }
+}
+
+// Controlla collisioni tra serpenti
+function checkCollisions() {
+  const players = Object.values(gameState.players);
+
+  for (const player of players) {
+    if (!player.snake || player.snake.length === 0) continue;
+
+    const head = player.snake[0];
+
+    // Collisione con se stesso
+    for (let i = 1; i < player.snake.length; i++) {
+      if (head.x === player.snake[i].x && head.y === player.snake[i].y) {
+        // Reset del serpente
+        respawnPlayer(player);
+        break;
+      }
+    }
+
+    // Collisione con altri serpenti
+    for (const other of players) {
+      if (other.id === player.id) continue;
+      if (!other.snake) continue;
+
+      for (const segment of other.snake) {
+        if (head.x === segment.x && head.y === segment.y) {
+          // Il giocatore che collide muore
+          respawnPlayer(player);
+          // L'altro guadagna punti
+          other.score += 50;
+          break;
+        }
+      }
+    }
+  }
+}
+
+// Respawn di un giocatore
+function respawnPlayer(player) {
+  const spawn = generateSpawnPosition();
+  player.snake = [
+    spawn,
+    { x: spawn.x - GRID_SIZE, y: spawn.y },
+    { x: spawn.x - GRID_SIZE * 2, y: spawn.y }
+  ];
+  player.direction = 'right';
+  player.score = Math.max(0, player.score - 20); // Penalità
+}
+
+// ==================== GAME LOOP ====================
+function gameTick() {
+  // Muovi tutti i serpenti
+  for (const player of Object.values(gameState.players)) {
+    moveSnake(player);
+  }
+
+  // Controlla collisioni
+  checkCollisions();
+
+  // Broadcast stato a tutti i client
+  const state = {
+    players: Object.values(gameState.players).map(p => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      snake: p.snake,
+      direction: p.direction,
+      score: p.score
+    })),
+    food: gameState.food,
+    timestamp: Date.now()
+  };
+
+  io.emit('gameState', state);
+}
+
+// Avvia il game loop
+let gameLoop = null;
+function startGameLoop() {
+  if (gameLoop) return;
+  gameLoop = setInterval(gameTick, TICK_RATE);
+  console.log(`Game loop avviato (${1000/TICK_RATE} FPS)`);
+}
+
+function stopGameLoop() {
+  if (gameLoop) {
+    clearInterval(gameLoop);
+    gameLoop = null;
+    console.log('Game loop fermato');
+  }
+}
+
+// ==================== SOCKET.IO ====================
 io.on('connection', (socket) => {
-  console.log('Nuovo client connesso:', socket.id);
-  
-  // Gestione di un nuovo giocatore
+  console.log(`Client connesso: ${socket.id}`);
+
+  // Giocatore si unisce
   socket.on('join', (data) => {
-    // Crea posizione iniziale per il serpente
-    const initialSnake = [
-      { x: 100, y: 100 },
-      { x: 80, y: 100 },
-      { x: 60, y: 100 }
-    ];
-    
-    // Registra il nuovo giocatore
+    const spawn = generateSpawnPosition();
+
     gameState.players[socket.id] = {
       id: socket.id,
-      name: data.playerName || 'Giocatore',
-      color: data.playerColor || '#4CAF50',
-      snake: initialSnake,
+      name: data.name || 'Player',
+      color: data.color || '#4CAF50',
+      snake: [
+        spawn,
+        { x: spawn.x - GRID_SIZE, y: spawn.y },
+        { x: spawn.x - GRID_SIZE * 2, y: spawn.y }
+      ],
       direction: 'right',
-      score: 0,
-      lastUpdate: Date.now()
+      score: 0
     };
-    
-    // Invia stato iniziale al giocatore
-    socket.emit('gameState', {
-      player: gameState.players[socket.id],
-      foodItems: gameState.foodItems,
-      otherPlayers: Object.values(gameState.players).filter(p => p.id !== socket.id)
+
+    console.log(`Giocatore ${data.name} (${socket.id}) si è unito`);
+
+    // Invia conferma al giocatore
+    socket.emit('joined', {
+      id: socket.id,
+      player: gameState.players[socket.id]
     });
-    
-    // Notifica tutti gli altri giocatori
-    socket.broadcast.emit('playerJoined', gameState.players[socket.id]);
+
+    // Avvia game loop se c'è almeno un giocatore
+    if (Object.keys(gameState.players).length >= 1) {
+      startGameLoop();
+    }
   });
-  
-  // Aggiornamento della posizione del giocatore
-  socket.on('updatePlayer', (playerData) => {
-    if (!gameState.players[socket.id]) return;
-    
-    gameState.players[socket.id] = {
-      ...gameState.players[socket.id],
-      ...playerData,
-      lastUpdate: Date.now()
-    };
-    
-    // Invia l'aggiornamento a tutti gli altri
-    socket.broadcast.emit('playerMoved', gameState.players[socket.id]);
+
+  // Giocatore cambia direzione
+  socket.on('direction', (dir) => {
+    const player = gameState.players[socket.id];
+    if (!player) return;
+
+    // Previeni inversione (non puoi andare nella direzione opposta)
+    const opposites = { up: 'down', down: 'up', left: 'right', right: 'left' };
+    if (opposites[dir] !== player.direction) {
+      player.direction = dir;
+    }
   });
-  
-  // Ping per mantenere la connessione attiva
-  socket.on('ping', () => {
-    socket.emit('pong', { time: Date.now() });
+
+  // Ping per latenza
+  socket.on('ping', (timestamp) => {
+    socket.emit('pong', timestamp);
   });
-  
-  // Gestione disconnessione
+
+  // Disconnessione
   socket.on('disconnect', () => {
-    console.log('Client disconnesso:', socket.id);
-    
+    console.log(`Client disconnesso: ${socket.id}`);
+
     if (gameState.players[socket.id]) {
-      // Notifica tutti gli altri giocatori
-      socket.broadcast.emit('playerLeft', socket.id);
-      
-      // Rimuovi il giocatore
+      const name = gameState.players[socket.id].name;
       delete gameState.players[socket.id];
+      console.log(`Giocatore ${name} rimosso`);
+
+      // Notifica altri giocatori
+      io.emit('playerLeft', socket.id);
+    }
+
+    // Ferma game loop se non ci sono più giocatori
+    if (Object.keys(gameState.players).length === 0) {
+      stopGameLoop();
     }
   });
 });
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.status(200).json({
+// ==================== HTTP ENDPOINTS ====================
+app.get('/health', (req, res) => {
+  res.json({
     status: 'ok',
-    timestamp: new Date().toISOString(),
     players: Object.keys(gameState.players).length,
-    foodItems: gameState.foodItems.length
+    uptime: process.uptime()
   });
 });
 
-// API per ottenere lo stato attuale del gioco
-app.get('/api/state', (req, res) => {
-  res.json({
-    players: gameState.players,
-    foodItems: gameState.foodItems
-  });
+app.get('/state', (req, res) => {
+  res.json(gameState);
 });
 
-// API per unirsi al gioco
-app.post('/api/join', (req, res) => {
-  const { playerName, playerColor } = req.body;
-  
-  if (!playerName) {
-    return res.status(400).json({ error: 'Nome giocatore richiesto' });
-  }
-  
-  // Genera un ID casuale (normalmente gestito da socket.io)
-  const playerId = 'api-' + Math.random().toString(36).substring(2, 9);
-  
-  // Crea posizione iniziale per il serpente
-  const initialSnake = [
-    { x: 100, y: 100 },
-    { x: 80, y: 100 },
-    { x: 60, y: 100 }
-  ];
-  
-  // Registra il nuovo giocatore
-  gameState.players[playerId] = {
-    id: playerId,
-    name: playerName,
-    color: playerColor || '#4CAF50',
-    snake: initialSnake,
-    direction: 'right',
-    score: 0,
-    lastUpdate: Date.now()
-  };
-  
-  // Ritorna i dati al client
-  res.json({
-    player: gameState.players[playerId],
-    foodItems: gameState.foodItems,
-    otherPlayers: Object.values(gameState.players).filter(p => p.id !== playerId)
-  });
+// ==================== STARTUP ====================
+initFood();
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`
+========================================
+   SNAKE BATTLE - SERVER AUTHORITATIVE
+========================================
+   Server: http://localhost:${PORT}
+   Network: http://0.0.0.0:${PORT}
+   Tick Rate: ${1000/TICK_RATE} FPS
+========================================
+  `);
 });
-
-// Gestione degli errori non catturati
-process.on('uncaughtException', (err) => {
-  console.error('ERRORE NON CATTURATO:', err);
-  // Continua l'esecuzione senza crash
-});
-
-// Avvio del server
-if (require.main === module) {
-  server.listen(PORT, () => {
-    console.log(`Server in esecuzione su porta ${PORT}`);
-  });
-}
-
-// Esportazione per l'uso con Vercel
-module.exports = app; 
