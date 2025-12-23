@@ -20,6 +20,20 @@ const getServerUrl = () => {
 // Cache per i colori calcolati (memoization)
 const colorCache = new Map();
 
+// Snake skin definitions
+const SNAKE_SKINS = [
+  { id: 'classic', name: 'Classic', icon: '🟩', description: 'Stile classico' },
+  { id: 'rainbow', name: 'Rainbow', icon: '🌈', description: 'Colori arcobaleno' },
+  { id: 'neon', name: 'Neon', icon: '✨', description: 'Effetto luminoso' },
+  { id: 'fire', name: 'Fire', icon: '🔥', description: 'Sfumatura fuoco' },
+  { id: 'ice', name: 'Ice', icon: '❄️', description: 'Sfumatura ghiaccio' },
+  { id: 'ghost', name: 'Ghost', icon: '👻', description: 'Semi-trasparente' },
+  { id: 'electric', name: 'Electric', icon: '⚡', description: 'Effetto elettrico' },
+  { id: 'ocean', name: 'Ocean', icon: '🌊', description: 'Sfumatura oceano' },
+  { id: 'candy', name: 'Candy', icon: '🍬', description: 'Strisce colorate' },
+  { id: 'diamond', name: 'Diamond', icon: '💎', description: 'Effetto cristallo' },
+];
+
 const darkenColor = (hex, percent) => {
   if (!hex || typeof hex !== 'string') return '#000000';
   const cacheKey = `${hex}-${percent}`;
@@ -40,9 +54,89 @@ const darkenColor = (hex, percent) => {
   }
 };
 
+// Rainbow colors for rainbow skin
+const RAINBOW_COLORS = ['#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#9400d3'];
+
+// Get segment color based on skin type
+const getSegmentStyle = (skin, baseColor, index, totalLength, timestamp) => {
+  const t = timestamp || Date.now();
+
+  switch (skin) {
+    case 'rainbow':
+      const rainbowIndex = (index + Math.floor(t / 100)) % RAINBOW_COLORS.length;
+      return { color: RAINBOW_COLORS[rainbowIndex], glow: false, alpha: 1 };
+
+    case 'neon':
+      return { color: baseColor, glow: true, glowColor: baseColor, glowBlur: 15, alpha: 1 };
+
+    case 'fire':
+      const fireColors = ['#ff4500', '#ff6600', '#ff8800', '#ffaa00', '#ffcc00'];
+      const fireIndex = Math.min(index, fireColors.length - 1);
+      return { color: fireColors[fireIndex], glow: true, glowColor: '#ff4500', glowBlur: 10, alpha: 1 };
+
+    case 'ice':
+      const iceColors = ['#00ffff', '#40e0d0', '#7fffd4', '#afeeee', '#e0ffff'];
+      const iceIndex = Math.min(index, iceColors.length - 1);
+      return { color: iceColors[iceIndex], glow: true, glowColor: '#00ffff', glowBlur: 8, alpha: 1 };
+
+    case 'ghost':
+      return { color: baseColor, glow: false, alpha: 0.5 - (index * 0.03) };
+
+    case 'electric':
+      const flicker = Math.sin(t / 50 + index) > 0 ? 1 : 0.7;
+      return { color: '#00ffff', glow: true, glowColor: '#00ffff', glowBlur: 12 * flicker, alpha: flicker };
+
+    case 'ocean':
+      const oceanColors = ['#0077be', '#0099cc', '#00b4d8', '#48cae4', '#90e0ef'];
+      const oceanIndex = Math.min(index, oceanColors.length - 1);
+      return { color: oceanColors[oceanIndex], glow: false, alpha: 1 };
+
+    case 'candy':
+      const candyIndex = index % 2;
+      return { color: candyIndex === 0 ? baseColor : '#ffffff', glow: false, alpha: 1 };
+
+    case 'diamond':
+      const shimmer = 0.7 + Math.sin(t / 200 + index * 0.5) * 0.3;
+      return { color: baseColor, glow: true, glowColor: '#ffffff', glowBlur: 8, alpha: shimmer };
+
+    case 'classic':
+    default:
+      return { color: darkenColor(baseColor, index * 5), glow: false, alpha: 1 };
+  }
+};
+
+// Draw a snake segment with skin effects
+const drawSnakeSegment = (ctx, x, y, size, style, isHead) => {
+  ctx.save();
+
+  // Apply glow effect
+  if (style.glow) {
+    ctx.shadowColor = style.glowColor || style.color;
+    ctx.shadowBlur = style.glowBlur || 10;
+  }
+
+  // Apply alpha
+  ctx.globalAlpha = style.alpha || 1;
+
+  // Draw segment
+  ctx.fillStyle = style.color;
+
+  if (isHead) {
+    // Rounded head
+    ctx.beginPath();
+    ctx.roundRect(x, y, size - 1, size - 1, 4);
+    ctx.fill();
+  } else {
+    ctx.fillRect(x, y, size - 1, size - 1);
+  }
+
+  ctx.restore();
+};
+
 export default function Home() {
   const [playerName, setPlayerName] = useState('');
-  const [playerColor, setPlayerColor] = useState('#4CAF50');
+  const [playerColor, setPlayerColor] = useState('#22c55e');
+  const [playerSkin, setPlayerSkin] = useState('classic');
   const [gameStarted, setGameStarted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -170,7 +264,10 @@ export default function Home() {
         const prevPlayer = prevPlayers.find(p => p.id === player.id);
         const prevSnake = prevPlayer?.snake || playerSnake;
 
-        // Draw snake segments with interpolation
+        // Draw snake segments with interpolation and skin effects
+        const playerSkinType = player.skin || 'classic';
+        const timestamp = Date.now();
+
         playerSnake.forEach((segment, index) => {
           // Interpolate position if we have previous data
           let drawX = segment.x;
@@ -188,16 +285,18 @@ export default function Home() {
             }
           }
 
+          // Get skin style for this segment
+          const segmentStyle = getSegmentStyle(playerSkinType, pColor, index, playerSnake.length, timestamp);
+
           if (index === 0) {
             // Head with border (thicker for own snake)
             ctx.fillStyle = '#FFFFFF';
             const border = isMe ? 2 : 1;
             ctx.fillRect(drawX - border, drawY - border, gridSize + border * 2, gridSize + border * 2);
-            ctx.fillStyle = pColor;
-          } else {
-            ctx.fillStyle = darkenColor(pColor, index * 5);
           }
-          ctx.fillRect(drawX, drawY, gridSize - 1, gridSize - 1);
+
+          // Draw segment with skin effect
+          drawSnakeSegment(ctx, drawX, drawY, gridSize, segmentStyle, index === 0);
 
           // Eyes on head (only for own snake)
           if (index === 0 && isMe) {
@@ -410,7 +509,8 @@ export default function Home() {
         // Join the game
         socket.emit('join', {
           name: playerName,
-          color: playerColor
+          color: playerColor,
+          skin: playerSkin
         });
       });
 
@@ -556,19 +656,24 @@ export default function Home() {
                 {/* Snake Preview */}
                 <div className="snake-preview">
                   <div className="preview-snake">
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <div
-                        key={i}
-                        className="preview-segment"
-                        style={{
-                          backgroundColor: playerColor,
-                          opacity: 1 - i * 0.15,
-                          transform: `scale(${1 - i * 0.08})`
-                        }}
-                      />
-                    ))}
+                    {[0, 1, 2, 3, 4].map((i) => {
+                      const style = getSegmentStyle(playerSkin, playerColor, i, 5, Date.now());
+                      return (
+                        <div
+                          key={i}
+                          className="preview-segment"
+                          style={{
+                            backgroundColor: style.color,
+                            opacity: style.alpha,
+                            transform: `scale(${1 - i * 0.08})`,
+                            boxShadow: style.glow ? `0 0 ${style.glowBlur}px ${style.glowColor}` : 'none'
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                   <span className="preview-name">{playerName || 'Il tuo nome'}</span>
+                  <span className="preview-skin">{SNAKE_SKINS.find(s => s.id === playerSkin)?.icon} {SNAKE_SKINS.find(s => s.id === playerSkin)?.name}</span>
                 </div>
 
                 <div className="input-group">
@@ -586,6 +691,7 @@ export default function Home() {
                   <span className="input-icon">👤</span>
                 </div>
 
+                {/* Color Selection */}
                 <div className="color-section">
                   <div className="color-selected" style={{ backgroundColor: playerColor }}>
                     <span className="color-check">✓</span>
@@ -609,6 +715,24 @@ export default function Home() {
                       />
                       <span className="color-custom-btn">+</span>
                     </label>
+                  </div>
+                </div>
+
+                {/* Skin Selection */}
+                <div className="skin-section">
+                  <label className="skin-label">Scegli la tua Skin</label>
+                  <div className="skin-grid">
+                    {SNAKE_SKINS.map((skin) => (
+                      <button
+                        key={skin.id}
+                        type="button"
+                        className={`skin-card ${playerSkin === skin.id ? 'active' : ''}`}
+                        onClick={() => setPlayerSkin(skin.id)}
+                      >
+                        <span className="skin-icon">{skin.icon}</span>
+                        <span className="skin-name">{skin.name}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -922,6 +1046,14 @@ export default function Home() {
           color: rgba(255, 255, 255, 0.8);
         }
 
+        .preview-skin {
+          font-size: 0.85rem;
+          color: rgba(255, 255, 255, 0.6);
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
         /* Input Group */
         .input-group {
           position: relative;
@@ -1060,6 +1192,65 @@ export default function Home() {
           border-color: rgba(255, 255, 255, 0.6);
           color: white;
           background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Skin Section */
+        .skin-section {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .skin-label {
+          font-size: 0.9rem;
+          color: rgba(255, 255, 255, 0.7);
+          text-align: center;
+        }
+
+        .skin-grid {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 8px;
+        }
+
+        .skin-card {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          padding: 10px 6px;
+          background: rgba(255, 255, 255, 0.05);
+          border: 2px solid rgba(255, 255, 255, 0.1);
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .skin-card:hover {
+          background: rgba(255, 255, 255, 0.1);
+          border-color: rgba(255, 255, 255, 0.2);
+          transform: translateY(-2px);
+        }
+
+        .skin-card.active {
+          background: rgba(76, 175, 80, 0.2);
+          border-color: #4CAF50;
+          box-shadow: 0 0 15px rgba(76, 175, 80, 0.3);
+        }
+
+        .skin-icon {
+          font-size: 1.5rem;
+        }
+
+        .skin-name {
+          font-size: 0.65rem;
+          color: rgba(255, 255, 255, 0.7);
+          text-align: center;
+        }
+
+        .skin-card.active .skin-name {
+          color: #4CAF50;
+          font-weight: 600;
         }
 
         /* Play Button */

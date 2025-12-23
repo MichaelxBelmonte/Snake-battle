@@ -197,6 +197,7 @@ function gameTick() {
       id: p.id,
       name: p.name,
       color: p.color,
+      skin: p.skin || 'classic',
       snake: p.snake,
       direction: p.direction,
       score: p.score,
@@ -239,6 +240,7 @@ io.on('connection', (socket) => {
       id: socket.id,
       name: data.name || 'Player',
       color: data.color || '#4CAF50',
+      skin: data.skin || 'classic',
       snake: [
         spawn,
         { x: spawn.x - GRID_SIZE, y: spawn.y },
