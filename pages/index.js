@@ -969,14 +969,70 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Game Canvas */}
-            <div className="game-container">
-              <canvas
-                ref={canvasRef}
-                width="800"
-                height="600"
-                className="game-canvas"
-              />
+            {/* Game Area with Sidebar */}
+            <div className="game-area">
+              {/* Game Canvas */}
+              <div className="game-container">
+                <canvas
+                  ref={canvasRef}
+                  width="800"
+                  height="600"
+                  className="game-canvas"
+                />
+              </div>
+
+              {/* Legend Sidebar */}
+              {!isMobile && (
+                <div className="game-sidebar">
+                  <div className="sidebar-section">
+                    <h3>🎮 Controlli</h3>
+                    <div className="sidebar-item">
+                      <span className="key-badge">↑↓←→</span>
+                      <span>o</span>
+                      <span className="key-badge">WASD</span>
+                    </div>
+                  </div>
+
+                  <div className="sidebar-section">
+                    <h3>🍎 Cibo & Punti</h3>
+                    <div className="sidebar-item">
+                      <span className="food-indicator red"></span>
+                      <span>Normale: +10 pts</span>
+                    </div>
+                    <div className="sidebar-item">
+                      <span className="food-indicator gold"></span>
+                      <span>Bonus: +25 pts</span>
+                    </div>
+                    <div className="sidebar-item">
+                      <span className="food-indicator purple"></span>
+                      <span>Super: +50 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="sidebar-section">
+                    <h3>📏 Crescita</h3>
+                    <p className="sidebar-text">
+                      Il serpente cresce di <strong>+1 segmento</strong> ogni <strong>50 punti</strong>
+                    </p>
+                  </div>
+
+                  <div className="sidebar-section">
+                    <h3>⚔️ Regole</h3>
+                    <div className="sidebar-item">
+                      <span>💀</span>
+                      <span>Evita te stesso</span>
+                    </div>
+                    <div className="sidebar-item">
+                      <span>🎯</span>
+                      <span>Colpisci i nemici</span>
+                    </div>
+                    <div className="sidebar-item">
+                      <span>🏆</span>
+                      <span>Kill = +50 pts</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Mobile Controls */}
@@ -1601,7 +1657,7 @@ export default function Home() {
           flex-direction: column;
           align-items: center;
           width: 100%;
-          max-width: 850px;
+          max-width: 1100px;
           margin: 0 auto;
           padding: 20px;
           animation: fadeIn 0.5s ease;
@@ -1617,6 +1673,7 @@ export default function Home() {
           justify-content: space-between;
           align-items: center;
           width: 100%;
+          max-width: 800px;
           padding: 15px 20px;
           background: rgba(0, 0, 0, 0.3);
           border-radius: 12px 12px 0 0;
@@ -1650,6 +1707,12 @@ export default function Home() {
           font-size: 1rem;
         }
 
+        .game-area {
+          display: flex;
+          gap: 20px;
+          align-items: flex-start;
+        }
+
         .game-container {
           background: #000;
           border-radius: 0 0 12px 12px;
@@ -1662,6 +1725,75 @@ export default function Home() {
           max-width: 100%;
           height: auto;
         }
+
+        /* ========== GAME SIDEBAR ========== */
+        .game-sidebar {
+          width: 200px;
+          background: rgba(0, 0, 0, 0.4);
+          border-radius: 12px;
+          padding: 15px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .sidebar-section {
+          margin-bottom: 18px;
+        }
+
+        .sidebar-section:last-child {
+          margin-bottom: 0;
+        }
+
+        .sidebar-section h3 {
+          font-size: 0.85rem;
+          font-weight: 600;
+          margin: 0 0 10px 0;
+          padding-bottom: 6px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          color: rgba(255, 255, 255, 0.9);
+        }
+
+        .sidebar-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 0.8rem;
+          color: rgba(255, 255, 255, 0.7);
+          margin-bottom: 6px;
+        }
+
+        .sidebar-item:last-child {
+          margin-bottom: 0;
+        }
+
+        .sidebar-text {
+          font-size: 0.8rem;
+          color: rgba(255, 255, 255, 0.7);
+          margin: 0;
+          line-height: 1.4;
+        }
+
+        .sidebar-text strong {
+          color: #4CAF50;
+        }
+
+        .key-badge {
+          background: rgba(255, 255, 255, 0.15);
+          padding: 3px 8px;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          font-family: monospace;
+        }
+
+        .food-indicator {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+
+        .food-indicator.red { background: #FF6347; }
+        .food-indicator.gold { background: #FFD700; box-shadow: 0 0 6px #FFD700; }
+        .food-indicator.purple { background: #9932CC; box-shadow: 0 0 6px #9932CC; }
 
         /* ========== MOBILE CONTROLS ========== */
         .mobile-controls {

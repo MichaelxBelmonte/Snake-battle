@@ -14,6 +14,7 @@ const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
 const TICK_RATE = 100; // ms - server tick ogni 100ms (10 FPS) - meno traffico di rete
 const SNAKE_SPEED = 1; // Serpente si muove ogni tick (10 movimenti/sec)
+const GROWTH_THRESHOLD = 50; // Serpente cresce di 1 segmento ogni N punti
 
 // Middleware
 app.use(cors());
@@ -117,20 +118,28 @@ function moveSnake(player) {
   player.snake.unshift(head);
 
   // Controlla collisione con cibo
-  let ate = false;
+  let shouldGrow = false;
   for (let i = 0; i < gameState.food.length; i++) {
     const food = gameState.food[i];
     if (head.x === food.x && head.y === food.y) {
-      ate = true;
+      const oldScore = player.score;
       player.score += food.points || 10;
+
+      // Cresci solo quando superi una soglia di punti
+      const oldMilestone = Math.floor(oldScore / GROWTH_THRESHOLD);
+      const newMilestone = Math.floor(player.score / GROWTH_THRESHOLD);
+      if (newMilestone > oldMilestone) {
+        shouldGrow = true;
+      }
+
       // Rigenera il cibo in nuova posizione con nuovo tipo
       gameState.food[i] = generateFood();
       break;
     }
   }
 
-  // Se non ha mangiato, rimuovi la coda
-  if (!ate) {
+  // Rimuovi la coda solo se non deve crescere
+  if (!shouldGrow) {
     player.snake.pop();
   }
 }
