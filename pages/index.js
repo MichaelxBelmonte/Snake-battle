@@ -495,272 +495,810 @@ export default function Home() {
     };
   }, []);
 
+  // Fetch online player count
+  const [onlinePlayers, setOnlinePlayers] = useState(0);
+
+  useEffect(() => {
+    if (gameStarted) return;
+    const fetchPlayers = async () => {
+      try {
+        const res = await fetch(`${getServerUrl()}/health`);
+        const data = await res.json();
+        setOnlinePlayers(data.players || 0);
+      } catch (e) {
+        setOnlinePlayers(0);
+      }
+    };
+    fetchPlayers();
+    const interval = setInterval(fetchPlayers, 5000);
+    return () => clearInterval(interval);
+  }, [gameStarted]);
+
   return (
     <div className="container">
       <Head>
-        <title>Snake Battle - Multiplayer</title>
-        <meta name="description" content="Snake Multiplayer Battle" />
+        <title>Snake Battle - Multiplayer Online</title>
+        <meta name="description" content="Play Snake Battle - The ultimate multiplayer snake game. Compete against players worldwide!" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐍</text></svg>" />
       </Head>
 
+      {/* Animated background */}
+      <div className="bg-animation">
+        <div className="bg-gradient"></div>
+        <div className="bg-grid"></div>
+      </div>
+
       <main className="main">
-        <h1 className="title">Snake Battle</h1>
-
         {!gameStarted ? (
-          <div className="loginContainer">
-            <form onSubmit={handleStartGame} className="loginForm">
-              <div className="form-group">
-                <label htmlFor="name">Nome:</label>
-                <input
-                  type="text"
-                  id="name"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  required
-                  placeholder="Inserisci il tuo nome"
-                  maxLength={20}
-                />
+          <>
+            {/* Hero Section */}
+            <div className="hero">
+              <div className="logo">
+                <span className="logo-icon">🐍</span>
+                <h1 className="title">
+                  <span className="title-snake">SNAKE</span>
+                  <span className="title-battle">BATTLE</span>
+                </h1>
               </div>
+              <p className="subtitle">Multiplayer Arena</p>
 
-              <div className="form-group">
-                <label htmlFor="color">Colore:</label>
-                <input
-                  type="color"
-                  id="color"
-                  value={playerColor}
-                  onChange={(e) => setPlayerColor(e.target.value)}
-                />
+              {/* Online indicator */}
+              <div className="online-badge">
+                <span className="pulse"></span>
+                <span>{onlinePlayers} {onlinePlayers === 1 ? 'giocatore' : 'giocatori'} online</span>
               </div>
-
-              <button type="submit" disabled={isLoading}>
-                {isLoading ? 'Connessione...' : 'Gioca Online'}
-              </button>
-
-              {error && <p className="error">{error}</p>}
-            </form>
-
-            <div className="instructions-card">
-              <h2>Come giocare</h2>
-              <ul>
-                <li>Usa le <strong>frecce direzionali</strong> o <strong>WASD</strong> per muovere</li>
-                <li>Raccogli il <strong>cibo</strong> per crescere (+10 punti)</li>
-                <li>Evita di collidere con te stesso o altri giocatori</li>
-                <li>Se colpisci un altro giocatore, lui guadagna 50 punti!</li>
-              </ul>
-              <p className="server-info" suppressHydrationWarning>
-                Server: {typeof window !== 'undefined' ? getServerUrl() : ''}
-              </p>
             </div>
-          </div>
-        ) : (
-          <div className="game-container">
-            <canvas
-              ref={canvasRef}
-              width="800"
-              height="600"
-              style={{
-                display: 'block',
-                margin: '0 auto',
-                border: '4px solid #333',
-                borderRadius: '8px',
-                backgroundColor: '#121212',
-                maxWidth: '100%',
-                height: 'auto'
-              }}
-            />
 
+            {/* Main Card */}
+            <div className="card">
+              <form onSubmit={handleStartGame} className="form">
+                {/* Snake Preview */}
+                <div className="snake-preview">
+                  <div className="preview-snake">
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <div
+                        key={i}
+                        className="preview-segment"
+                        style={{
+                          backgroundColor: playerColor,
+                          opacity: 1 - i * 0.15,
+                          transform: `scale(${1 - i * 0.08})`
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <span className="preview-name">{playerName || 'Il tuo nome'}</span>
+                </div>
+
+                <div className="input-group">
+                  <input
+                    type="text"
+                    id="name"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    required
+                    placeholder=" "
+                    maxLength={15}
+                    className="input"
+                  />
+                  <label htmlFor="name" className="input-label">Nome Giocatore</label>
+                  <span className="input-icon">👤</span>
+                </div>
+
+                <div className="color-group">
+                  <label className="color-label">Colore Snake</label>
+                  <div className="color-options">
+                    {['#4CAF50', '#2196F3', '#FF5722', '#9C27B0', '#FFEB3B', '#00BCD4', '#E91E63', '#FF9800'].map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        className={`color-btn ${playerColor === color ? 'selected' : ''}`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => setPlayerColor(color)}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={playerColor}
+                      onChange={(e) => setPlayerColor(e.target.value)}
+                      className="color-custom"
+                      title="Colore personalizzato"
+                    />
+                  </div>
+                </div>
+
+                <button type="submit" disabled={isLoading} className="play-btn">
+                  {isLoading ? (
+                    <>
+                      <span className="spinner"></span>
+                      Connessione...
+                    </>
+                  ) : (
+                    <>
+                      <span className="play-icon">▶</span>
+                      GIOCA ORA
+                    </>
+                  )}
+                </button>
+
+                {error && <p className="error">{error}</p>}
+              </form>
+            </div>
+
+            {/* Instructions */}
+            <div className="instructions">
+              <h3>Come Giocare</h3>
+              <div className="instruction-grid">
+                <div className="instruction-item">
+                  <span className="instruction-icon">🎮</span>
+                  <span>Frecce o WASD per muoverti</span>
+                </div>
+                <div className="instruction-item">
+                  <span className="instruction-icon">🍎</span>
+                  <span>Mangia il cibo per crescere</span>
+                </div>
+                <div className="instruction-item">
+                  <span className="instruction-icon">💀</span>
+                  <span>Evita collisioni (score reset!)</span>
+                </div>
+                <div className="instruction-item">
+                  <span className="instruction-icon">🏆</span>
+                  <span>Uccidi altri per +50 punti</span>
+                </div>
+              </div>
+
+              {/* Food Types */}
+              <div className="food-legend">
+                <span className="food-item"><span className="food-dot normal"></span> +10</span>
+                <span className="food-item"><span className="food-dot bonus"></span> +25</span>
+                <span className="food-item"><span className="food-dot super"></span> +50</span>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <footer className="footer">
+              <p>Snake Battle v1.0 - Made with ❤️</p>
+            </footer>
+          </>
+        ) : (
+          <div className="game-wrapper">
+            {/* Game Header */}
+            <div className="game-header">
+              <div className="game-title">
+                <span>🐍</span> SNAKE BATTLE
+              </div>
+              <div className="game-stats">
+                <span className="stat">
+                  <span className="stat-icon">👥</span>
+                  {gameState.players.length}
+                </span>
+                <span className="stat">
+                  <span className="stat-icon">📶</span>
+                  {latency}ms
+                </span>
+              </div>
+            </div>
+
+            {/* Game Canvas */}
+            <div className="game-container">
+              <canvas
+                ref={canvasRef}
+                width="800"
+                height="600"
+                className="game-canvas"
+              />
+            </div>
+
+            {/* Mobile Controls */}
             {isMobile && (
               <div className="mobile-controls">
-                <div className="control-button up" onClick={() => handleMobileDirection('up')}>▲</div>
-                <div className="controls-row">
-                  <div className="control-button left" onClick={() => handleMobileDirection('left')}>◀</div>
-                  <div className="control-button right" onClick={() => handleMobileDirection('right')}>▶</div>
+                <button className="ctrl-btn up" onClick={() => handleMobileDirection('up')}>
+                  <span>▲</span>
+                </button>
+                <div className="ctrl-row">
+                  <button className="ctrl-btn left" onClick={() => handleMobileDirection('left')}>
+                    <span>◀</span>
+                  </button>
+                  <button className="ctrl-btn right" onClick={() => handleMobileDirection('right')}>
+                    <span>▶</span>
+                  </button>
                 </div>
-                <div className="control-button down" onClick={() => handleMobileDirection('down')}>▼</div>
+                <button className="ctrl-btn down" onClick={() => handleMobileDirection('down')}>
+                  <span>▼</span>
+                </button>
               </div>
             )}
 
-            <button className="restart-button" onClick={() => window.location.reload()}>
-              Esci
+            {/* Exit Button */}
+            <button className="exit-btn" onClick={() => window.location.reload()}>
+              <span>✕</span> Esci dal Gioco
             </button>
           </div>
         )}
       </main>
 
       <style jsx>{`
+        /* ========== BASE & BACKGROUND ========== */
         .container {
+          position: relative;
+          min-height: 100vh;
+          overflow-x: hidden;
+          font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+          color: white;
+        }
+
+        .bg-animation {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          z-index: -1;
+          overflow: hidden;
+        }
+
+        .bg-gradient {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+          animation: gradientShift 15s ease infinite;
+        }
+
+        @keyframes gradientShift {
+          0%, 100% { filter: hue-rotate(0deg); }
+          50% { filter: hue-rotate(30deg); }
+        }
+
+        .bg-grid {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          background-image:
+            linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+          background-size: 50px 50px;
+          animation: gridMove 20s linear infinite;
+        }
+
+        @keyframes gridMove {
+          0% { transform: translate(0, 0); }
+          100% { transform: translate(50px, 50px); }
+        }
+
+        .main {
+          position: relative;
+          z-index: 1;
           display: flex;
           flex-direction: column;
           align-items: center;
-          min-height: 100vh;
           padding: 20px;
-          background-color: #191970;
-          color: white;
-          font-family: Arial, sans-serif;
+          min-height: 100vh;
         }
 
-        h1 {
-          margin-bottom: 20px;
-          font-size: 2.5rem;
-          background: linear-gradient(45deg, #2196F3, #e91e63);
+        /* ========== HERO SECTION ========== */
+        .hero {
+          text-align: center;
+          margin-bottom: 30px;
+          animation: fadeInDown 0.8s ease;
+        }
+
+        @keyframes fadeInDown {
+          from { opacity: 0; transform: translateY(-30px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .logo {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 15px;
+          margin-bottom: 10px;
+        }
+
+        .logo-icon {
+          font-size: 4rem;
+          animation: bounce 2s ease infinite;
+          filter: drop-shadow(0 0 20px rgba(76, 175, 80, 0.5));
+        }
+
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+
+        .title {
+          display: flex;
+          flex-direction: column;
+          margin: 0;
+          line-height: 1;
+        }
+
+        .title-snake {
+          font-size: 3.5rem;
+          font-weight: 900;
+          background: linear-gradient(135deg, #4CAF50, #8BC34A);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
-          text-align: center;
+          text-shadow: 0 0 40px rgba(76, 175, 80, 0.3);
         }
 
-        .loginContainer {
+        .title-battle {
+          font-size: 2rem;
+          font-weight: 300;
+          letter-spacing: 0.5em;
+          color: #fff;
+          text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+        }
+
+        .subtitle {
+          font-size: 1.1rem;
+          color: rgba(255, 255, 255, 0.7);
+          margin: 0;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+        }
+
+        .online-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 15px;
+          padding: 8px 16px;
+          background: rgba(76, 175, 80, 0.2);
+          border: 1px solid rgba(76, 175, 80, 0.4);
+          border-radius: 50px;
+          font-size: 0.9rem;
+        }
+
+        .pulse {
+          width: 10px;
+          height: 10px;
+          background: #4CAF50;
+          border-radius: 50%;
+          animation: pulse 2s ease infinite;
+        }
+
+        @keyframes pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+          50% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
+        }
+
+        /* ========== CARD ========== */
+        .card {
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 24px;
+          padding: 30px;
+          width: 100%;
+          max-width: 420px;
+          animation: fadeInUp 0.8s ease 0.2s both;
+        }
+
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(30px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .form {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+
+        /* Snake Preview */
+        .snake-preview {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 20px;
-          width: 100%;
-          max-width: 500px;
           padding: 20px;
-          background-color: #2c3e50;
-          border-radius: 10px;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+          background: rgba(0, 0, 0, 0.3);
+          border-radius: 16px;
+          margin-bottom: 10px;
         }
 
-        form {
+        .preview-snake {
           display: flex;
-          flex-direction: column;
+          gap: 4px;
+          margin-bottom: 10px;
+        }
+
+        .preview-segment {
+          width: 24px;
+          height: 24px;
+          border-radius: 4px;
+          transition: all 0.3s ease;
+        }
+
+        .preview-name {
+          font-size: 1rem;
+          font-weight: 600;
+          color: rgba(255, 255, 255, 0.8);
+        }
+
+        /* Input Group */
+        .input-group {
+          position: relative;
+        }
+
+        .input {
           width: 100%;
-          gap: 15px;
+          padding: 16px 16px 16px 45px;
+          background: rgba(255, 255, 255, 0.1);
+          border: 2px solid rgba(255, 255, 255, 0.1);
+          border-radius: 12px;
+          color: white;
+          font-size: 1rem;
+          transition: all 0.3s ease;
+          box-sizing: border-box;
         }
 
-        .form-group {
+        .input:focus {
+          outline: none;
+          border-color: #4CAF50;
+          background: rgba(255, 255, 255, 0.15);
+        }
+
+        .input-label {
+          position: absolute;
+          left: 45px;
+          top: 50%;
+          transform: translateY(-50%);
+          color: rgba(255, 255, 255, 0.5);
+          transition: all 0.3s ease;
+          pointer-events: none;
+        }
+
+        .input:focus + .input-label,
+        .input:not(:placeholder-shown) + .input-label {
+          top: 0;
+          left: 12px;
+          font-size: 0.75rem;
+          background: #302b63;
+          padding: 0 8px;
+          border-radius: 4px;
+        }
+
+        .input-icon {
+          position: absolute;
+          left: 16px;
+          top: 50%;
+          transform: translateY(-50%);
+          font-size: 1.2rem;
+        }
+
+        /* Color Group */
+        .color-group {
           display: flex;
           flex-direction: column;
-          gap: 5px;
+          gap: 10px;
         }
 
-        label {
-          font-weight: bold;
+        .color-label {
+          font-size: 0.9rem;
+          color: rgba(255, 255, 255, 0.7);
         }
 
-        input {
-          padding: 10px;
-          border-radius: 4px;
-          border: 1px solid #ccc;
-          font-size: 16px;
+        .color-options {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
         }
 
-        button {
-          padding: 12px;
-          background-color: #3498db;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          font-size: 16px;
+        .color-btn {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          border: 3px solid transparent;
           cursor: pointer;
-          transition: background-color 0.2s;
+          transition: all 0.2s ease;
         }
 
-        button:hover {
-          background-color: #2980b9;
+        .color-btn:hover {
+          transform: scale(1.1);
         }
 
-        button:disabled {
-          background-color: #7f8c8d;
+        .color-btn.selected {
+          border-color: white;
+          box-shadow: 0 0 15px currentColor;
+        }
+
+        .color-custom {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          border: 2px dashed rgba(255, 255, 255, 0.3);
+          cursor: pointer;
+          background: transparent;
+          padding: 0;
+        }
+
+        .color-custom::-webkit-color-swatch-wrapper {
+          padding: 2px;
+        }
+
+        .color-custom::-webkit-color-swatch {
+          border-radius: 50%;
+          border: none;
+        }
+
+        /* Play Button */
+        .play-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 16px 32px;
+          background: linear-gradient(135deg, #4CAF50, #45a049);
+          border: none;
+          border-radius: 12px;
+          color: white;
+          font-size: 1.1rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+        }
+
+        .play-btn:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 30px rgba(76, 175, 80, 0.4);
+        }
+
+        .play-btn:disabled {
+          background: linear-gradient(135deg, #666, #555);
           cursor: not-allowed;
         }
 
+        .play-icon {
+          font-size: 1.2rem;
+        }
+
+        .spinner {
+          width: 20px;
+          height: 20px;
+          border: 3px solid rgba(255, 255, 255, 0.3);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
         .error {
-          color: #e74c3c;
-          font-weight: bold;
-        }
-
-        .instructions-card {
-          width: 100%;
-          padding: 15px;
-          background-color: #34495e;
+          background: rgba(231, 76, 60, 0.2);
+          border: 1px solid rgba(231, 76, 60, 0.4);
+          padding: 10px 15px;
           border-radius: 8px;
-        }
-
-        .instructions-card h2 {
-          margin-top: 0;
-          margin-bottom: 10px;
-          color: #3498db;
-        }
-
-        .instructions-card ul {
+          color: #ff6b6b;
+          text-align: center;
           margin: 0;
-          padding-left: 20px;
-          line-height: 1.6;
         }
 
-        .server-info {
-          margin-top: 15px;
-          padding-top: 10px;
-          border-top: 1px solid #4a6278;
-          font-size: 12px;
-          color: #95a5a6;
+        /* ========== INSTRUCTIONS ========== */
+        .instructions {
+          margin-top: 30px;
+          text-align: center;
+          animation: fadeInUp 0.8s ease 0.4s both;
+          max-width: 500px;
         }
 
-        .game-container {
+        .instructions h3 {
+          font-size: 1.2rem;
+          margin-bottom: 15px;
+          color: rgba(255, 255, 255, 0.9);
+        }
+
+        .instruction-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+
+        .instruction-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 15px;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+          font-size: 0.85rem;
+          color: rgba(255, 255, 255, 0.8);
+        }
+
+        .instruction-icon {
+          font-size: 1.3rem;
+        }
+
+        .food-legend {
+          display: flex;
+          justify-content: center;
+          gap: 20px;
+          padding: 15px;
+          background: rgba(0, 0, 0, 0.2);
+          border-radius: 10px;
+        }
+
+        .food-item {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 0.9rem;
+        }
+
+        .food-dot {
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+        }
+
+        .food-dot.normal { background: #FF6347; }
+        .food-dot.bonus { background: #FFD700; box-shadow: 0 0 8px #FFD700; }
+        .food-dot.super { background: #9932CC; box-shadow: 0 0 8px #9932CC; }
+
+        /* ========== FOOTER ========== */
+        .footer {
+          margin-top: auto;
+          padding: 20px;
+          text-align: center;
+          color: rgba(255, 255, 255, 0.4);
+          font-size: 0.85rem;
+          animation: fadeInUp 0.8s ease 0.6s both;
+        }
+
+        .footer p {
+          margin: 0;
+        }
+
+        /* ========== GAME WRAPPER ========== */
+        .game-wrapper {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 20px;
-          margin-top: 20px;
           width: 100%;
-          max-width: 840px;
+          max-width: 850px;
+          animation: fadeIn 0.5s ease;
         }
 
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        .game-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          width: 100%;
+          padding: 15px 20px;
+          background: rgba(0, 0, 0, 0.3);
+          border-radius: 12px 12px 0 0;
+          backdrop-filter: blur(10px);
+        }
+
+        .game-title {
+          font-size: 1.3rem;
+          font-weight: 700;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .game-stats {
+          display: flex;
+          gap: 15px;
+        }
+
+        .stat {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 12px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 20px;
+          font-size: 0.9rem;
+        }
+
+        .stat-icon {
+          font-size: 1rem;
+        }
+
+        .game-container {
+          background: #000;
+          border-radius: 0 0 12px 12px;
+          overflow: hidden;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .game-canvas {
+          display: block;
+          max-width: 100%;
+          height: auto;
+        }
+
+        /* ========== MOBILE CONTROLS ========== */
         .mobile-controls {
           display: flex;
           flex-direction: column;
           align-items: center;
           margin-top: 20px;
+          gap: 5px;
         }
 
-        .controls-row {
+        .ctrl-row {
           display: flex;
-          gap: 50px;
+          gap: 60px;
         }
 
-        .control-button {
-          width: 60px;
-          height: 60px;
-          background-color: rgba(255, 255, 255, 0.2);
-          border: 2px solid rgba(255, 255, 255, 0.3);
+        .ctrl-btn {
+          width: 65px;
+          height: 65px;
+          background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05));
+          border: 2px solid rgba(255, 255, 255, 0.2);
           border-radius: 50%;
           display: flex;
           justify-content: center;
           align-items: center;
-          font-size: 24px;
-          margin: 5px;
-          user-select: none;
+          font-size: 1.5rem;
+          color: white;
           cursor: pointer;
+          transition: all 0.2s ease;
+          backdrop-filter: blur(5px);
         }
 
-        .control-button:active {
-          background-color: rgba(255, 255, 255, 0.3);
+        .ctrl-btn:active {
+          transform: scale(0.95);
+          background: linear-gradient(135deg, rgba(76, 175, 80, 0.4), rgba(76, 175, 80, 0.2));
+          border-color: #4CAF50;
         }
 
-        .restart-button {
+        /* ========== EXIT BUTTON ========== */
+        .exit-btn {
+          display: flex;
+          align-items: center;
+          gap: 8px;
           margin-top: 20px;
-          background-color: #e74c3c;
+          padding: 12px 24px;
+          background: rgba(231, 76, 60, 0.2);
+          border: 1px solid rgba(231, 76, 60, 0.4);
+          border-radius: 10px;
+          color: #ff6b6b;
+          font-size: 1rem;
+          cursor: pointer;
+          transition: all 0.3s ease;
         }
 
-        .restart-button:hover {
-          background-color: #c0392b;
+        .exit-btn:hover {
+          background: rgba(231, 76, 60, 0.3);
+          transform: translateY(-2px);
         }
 
+        /* ========== RESPONSIVE ========== */
         @media (max-width: 768px) {
-          .container {
-            padding: 10px;
-          }
+          .logo-icon { font-size: 3rem; }
+          .title-snake { font-size: 2.5rem; }
+          .title-battle { font-size: 1.5rem; letter-spacing: 0.3em; }
+          .subtitle { font-size: 0.9rem; }
+          .card { padding: 20px; margin: 0 10px; }
+          .instruction-grid { grid-template-columns: 1fr; }
+          .food-legend { flex-direction: column; gap: 10px; }
+          .game-header { flex-direction: column; gap: 10px; }
+          .ctrl-btn { width: 55px; height: 55px; font-size: 1.3rem; }
+          .ctrl-row { gap: 40px; }
+        }
 
-          h1 {
-            font-size: 2rem;
-          }
-
-          .control-button {
-            width: 50px;
-            height: 50px;
-            font-size: 20px;
-          }
+        @media (max-width: 480px) {
+          .main { padding: 10px; }
+          .logo-icon { font-size: 2.5rem; }
+          .title-snake { font-size: 2rem; }
+          .title-battle { font-size: 1.2rem; }
+          .preview-segment { width: 18px; height: 18px; }
         }
       `}</style>
     </div>
