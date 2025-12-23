@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3001;
 const GRID_SIZE = 20;
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
-const TICK_RATE = 50; // ms - il server aggiorna ogni 50ms (20 FPS)
+const TICK_RATE = 100; // ms - il server aggiorna ogni 100ms (10 FPS) - velocità bilanciata
 
 // Middleware
 app.use(cors());
@@ -42,6 +42,36 @@ function randomPosition() {
   };
 }
 
+// Genera cibo con tipo casuale
+function generateFood() {
+  const rand = Math.random();
+  let type, points, color;
+
+  if (rand < 0.6) {
+    // 60% - Cibo normale (rosso)
+    type = 'normal';
+    points = 10;
+    color = '#FF6347';
+  } else if (rand < 0.85) {
+    // 25% - Cibo bonus (oro)
+    type = 'bonus';
+    points = 25;
+    color = '#FFD700';
+  } else {
+    // 15% - Super cibo (viola)
+    type = 'super';
+    points = 50;
+    color = '#9932CC';
+  }
+
+  return {
+    ...randomPosition(),
+    type,
+    points,
+    color
+  };
+}
+
 // Genera posizione iniziale per nuovo serpente (evita sovrapposizioni)
 function generateSpawnPosition() {
   const margin = GRID_SIZE * 5;
@@ -54,8 +84,8 @@ function generateSpawnPosition() {
 // Inizializza cibo
 function initFood() {
   gameState.food = [];
-  for (let i = 0; i < 5; i++) {
-    gameState.food.push(randomPosition());
+  for (let i = 0; i < 8; i++) {
+    gameState.food.push(generateFood());
   }
 }
 
@@ -88,9 +118,9 @@ function moveSnake(player) {
     const food = gameState.food[i];
     if (head.x === food.x && head.y === food.y) {
       ate = true;
-      player.score += 10;
-      // Rigenera il cibo in nuova posizione
-      gameState.food[i] = randomPosition();
+      player.score += food.points || 10;
+      // Rigenera il cibo in nuova posizione con nuovo tipo
+      gameState.food[i] = generateFood();
       break;
     }
   }
@@ -128,8 +158,9 @@ function checkCollisions() {
         if (head.x === segment.x && head.y === segment.y) {
           // Il giocatore che collide muore
           respawnPlayer(player);
-          // L'altro guadagna punti
+          // L'altro guadagna punti e una kill
           other.score += 50;
+          other.kills = (other.kills || 0) + 1;
           break;
         }
       }
@@ -146,7 +177,8 @@ function respawnPlayer(player) {
     { x: spawn.x - GRID_SIZE * 2, y: spawn.y }
   ];
   player.direction = 'right';
-  player.score = Math.max(0, player.score - 20); // Penalità
+  player.score = 0; // Reset score to zero on death
+  player.deaths = (player.deaths || 0) + 1; // Track deaths
 }
 
 // ==================== GAME LOOP ====================
@@ -167,7 +199,10 @@ function gameTick() {
       color: p.color,
       snake: p.snake,
       direction: p.direction,
-      score: p.score
+      score: p.score,
+      kills: p.kills || 0,
+      deaths: p.deaths || 0,
+      length: p.snake ? p.snake.length : 0
     })),
     food: gameState.food,
     timestamp: Date.now()

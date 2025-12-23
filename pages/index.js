@@ -140,7 +140,7 @@ export default function Home() {
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const SERVER_TICK = 50; // Must match server tick rate
+    const SERVER_TICK = 100; // Must match server tick rate
 
     const draw = () => {
       // Calculate interpolation factor (0 to 1)
@@ -245,19 +245,32 @@ export default function Home() {
         ctx.fillText(player.name || 'Player', nameX + gridSize/2, nameY - 8);
       });
 
-      // Draw food
+      // Draw food with different colors based on type
       const currentFood = targetStateRef.current.food || [];
-      ctx.fillStyle = '#FF6347';
       currentFood.forEach(foodItem => {
+        const foodColor = foodItem.color || '#FF6347';
+        const foodSize = foodItem.type === 'super' ? gridSize/2 + 3 :
+                        foodItem.type === 'bonus' ? gridSize/2 + 1 : gridSize/2;
+
+        // Glow effect for special food
+        if (foodItem.type === 'super' || foodItem.type === 'bonus') {
+          ctx.shadowColor = foodColor;
+          ctx.shadowBlur = 10;
+        }
+
+        ctx.fillStyle = foodColor;
         ctx.beginPath();
-        ctx.arc(foodItem.x + gridSize/2, foodItem.y + gridSize/2, gridSize/2, 0, Math.PI * 2);
+        ctx.arc(foodItem.x + gridSize/2, foodItem.y + gridSize/2, foodSize, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = '#FFFFFF';
+        // Reset shadow
+        ctx.shadowBlur = 0;
+
+        // Shine effect
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
         ctx.beginPath();
         ctx.arc(foodItem.x + gridSize/3, foodItem.y + gridSize/3, gridSize/6, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = '#FF6347';
       });
 
       // Draw UI - Scores
@@ -284,21 +297,61 @@ export default function Home() {
       ctx.arc(770, 60, 6, 0, Math.PI * 2);
       ctx.fill();
 
-      // Leaderboard
+      // Leaderboard - improved UI
       const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score).slice(0, 5);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(5, 560, 150, sortedPlayers.length * 18 + 25);
+      const lbHeight = sortedPlayers.length * 22 + 35;
 
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 12px Arial';
+      // Background with gradient effect
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.beginPath();
+      ctx.roundRect(5, 600 - lbHeight - 5, 180, lbHeight, 8);
+      ctx.fill();
+
+      // Border
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Title
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 13px Arial';
       ctx.textAlign = 'left';
-      ctx.fillText('Classifica:', 10, 575);
+      ctx.fillText('LEADERBOARD', 12, 600 - lbHeight + 15);
 
-      ctx.font = '11px Arial';
+      // Players
+      ctx.font = '12px Arial';
       sortedPlayers.forEach((p, i) => {
-        const displayName = p.name.length > 10 ? p.name.substring(0, 10) + '...' : p.name;
-        ctx.fillStyle = p.id === playerId ? '#FFD700' : '#FFFFFF';
-        ctx.fillText(`${i + 1}. ${displayName}: ${p.score}`, 10, 590 + i * 15);
+        const yPos = 600 - lbHeight + 35 + i * 22;
+        const displayName = p.name.length > 8 ? p.name.substring(0, 8) + '..' : p.name;
+        const isMe = p.id === playerId;
+
+        // Highlight current player
+        if (isMe) {
+          ctx.fillStyle = 'rgba(255, 215, 0, 0.2)';
+          ctx.fillRect(8, yPos - 12, 172, 18);
+        }
+
+        // Rank medal
+        if (i === 0) ctx.fillStyle = '#FFD700'; // Gold
+        else if (i === 1) ctx.fillStyle = '#C0C0C0'; // Silver
+        else if (i === 2) ctx.fillStyle = '#CD7F32'; // Bronze
+        else ctx.fillStyle = '#FFFFFF';
+
+        ctx.fillText(`${i + 1}.`, 12, yPos);
+
+        // Name
+        ctx.fillStyle = isMe ? '#FFD700' : '#FFFFFF';
+        ctx.fillText(displayName, 30, yPos);
+
+        // Score
+        ctx.fillStyle = '#4CAF50';
+        ctx.fillText(`${p.score}`, 100, yPos);
+
+        // Kills
+        ctx.fillStyle = '#FF6347';
+        ctx.font = '10px Arial';
+        ctx.fillText(`K:${p.kills || 0}`, 145, yPos);
+        ctx.font = '12px Arial';
       });
 
       requestAnimationFrame(draw);
