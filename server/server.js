@@ -24,8 +24,11 @@ const io = new Server(server, {
     origin: "*",
     methods: ["GET", "POST"]
   },
-  pingTimeout: 10000,
-  pingInterval: 5000
+  pingTimeout: 5000,
+  pingInterval: 2000,
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true,
+  perMessageDeflate: false // Disable compression for lower latency
 });
 
 // ==================== GAME STATE ====================

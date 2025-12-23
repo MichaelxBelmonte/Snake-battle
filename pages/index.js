@@ -461,12 +461,14 @@ export default function Home() {
       ctx.textAlign = 'right';
       ctx.fillText(`Giocatori: ${gameState.players.length}`, 780, 25);
 
-      // Show latency
+      // Show latency with quality color
+      const pingColor = latency < 50 ? '#00FF00' : latency < 100 ? '#FFFF00' : latency < 150 ? '#FFA500' : '#FF0000';
       ctx.font = '12px Arial';
+      ctx.fillStyle = pingColor;
       ctx.fillText(`Ping: ${latency}ms`, 780, 45);
 
       // Connection status indicator
-      ctx.fillStyle = connectionStatus === 'connected' ? '#00FF00' : '#FF0000';
+      ctx.fillStyle = connectionStatus === 'connected' ? pingColor : '#FF0000';
       ctx.beginPath();
       ctx.arc(770, 60, 6, 0, Math.PI * 2);
       ctx.fill();
@@ -535,7 +537,9 @@ export default function Home() {
     return () => cancelAnimationFrame(animationId);
   }, [gameStarted, gameState, playerId, playerName, latency, connectionStatus]);
 
-  // Latency measurement
+  // Latency measurement with moving average
+  const pingHistoryRef = useRef([]);
+
   useEffect(() => {
     if (!socketRef.current || connectionStatus !== 'connected') return;
 
@@ -544,7 +548,10 @@ export default function Home() {
       socketRef.current.emit('ping', start);
     };
 
-    const interval = setInterval(measureLatency, 2000);
+    // Measure more frequently for smoother average
+    const interval = setInterval(measureLatency, 1000);
+    measureLatency(); // Immediate first measurement
+
     return () => clearInterval(interval);
   }, [connectionStatus]);
 
@@ -638,7 +645,15 @@ export default function Home() {
 
       socket.on('pong', (startTime) => {
         const lat = Date.now() - startTime;
-        setLatency(lat);
+        // Use moving average for stable ping display
+        pingHistoryRef.current.push(lat);
+        if (pingHistoryRef.current.length > 5) {
+          pingHistoryRef.current.shift();
+        }
+        const sorted = [...pingHistoryRef.current].sort((a, b) => a - b);
+        const trimmed = sorted.length >= 3 ? sorted.slice(1, -1) : sorted;
+        const avg = Math.round(trimmed.reduce((a, b) => a + b, 0) / trimmed.length);
+        setLatency(avg);
       });
 
       socket.on('playerLeft', (leftPlayerId) => {
@@ -947,8 +962,8 @@ export default function Home() {
                   <span className="stat-icon">👥</span>
                   {gameState.players.length}
                 </span>
-                <span className="stat">
-                  <span className="stat-icon">📶</span>
+                <span className="stat" style={{ color: latency < 50 ? '#4CAF50' : latency < 100 ? '#FFEB3B' : latency < 150 ? '#FF9800' : '#f44336' }}>
+                  <span className="stat-icon">{latency < 50 ? '🟢' : latency < 100 ? '🟡' : latency < 150 ? '🟠' : '🔴'}</span>
                   {latency}ms
                 </span>
               </div>
