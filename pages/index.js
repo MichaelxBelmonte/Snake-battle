@@ -10,8 +10,7 @@ const getServerUrl = () => {
 
   // Production: use Railway server
   if (hostname.includes('vercel.app') || hostname.includes('snake-battle')) {
-    // Replace with your Railway URL after deployment
-    return process.env.NEXT_PUBLIC_SOCKET_SERVER || 'https://snake-battle-server-production.up.railway.app';
+    return 'https://snake-battle-production.up.railway.app';
   }
 
   // Development: use local server
