@@ -168,10 +168,6 @@ export default function Home() {
   const lastUpdateTimeRef = useRef(Date.now());
   const interpolationFactorRef = useRef(0);
 
-  // Client-side prediction refs
-  const pendingDirectionRef = useRef(null);
-  const lastPredictedMoveRef = useRef(0);
-
   const [isMobile, setIsMobile] = useState(false);
   const [leaderboard, setLeaderboard] = useState([]);
   const [personalBest, setPersonalBest] = useState(0);
@@ -269,7 +265,6 @@ export default function Home() {
       const newDir = keyMap[e.key];
       if (newDir && directionRef.current !== opposites[newDir]) {
         directionRef.current = newDir;
-        pendingDirectionRef.current = newDir; // Store for client-side prediction
         // Send direction to server - server handles movement
         socketRef.current.emit('direction', newDir);
       }
@@ -315,29 +310,6 @@ export default function Home() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const SERVER_TICK = 50; // Must match server tick rate (20 FPS)
-    const GAME_WIDTH = 800;
-    const GAME_HEIGHT = 600;
-
-    // Client-side prediction: predict head position based on pending direction
-    const predictSnakeHead = (snake, direction) => {
-      if (!snake || snake.length === 0) return null;
-      const head = { ...snake[0] };
-
-      switch (direction) {
-        case 'up': head.y -= gridSize; break;
-        case 'down': head.y += gridSize; break;
-        case 'left': head.x -= gridSize; break;
-        case 'right': head.x += gridSize; break;
-      }
-
-      // Wraparound
-      if (head.x < 0) head.x = GAME_WIDTH - gridSize;
-      if (head.x >= GAME_WIDTH) head.x = 0;
-      if (head.y < 0) head.y = GAME_HEIGHT - gridSize;
-      if (head.y >= GAME_HEIGHT) head.y = 0;
-
-      return head;
-    };
 
     const draw = () => {
       // Calculate interpolation factor (0 to 1)
@@ -367,21 +339,11 @@ export default function Home() {
         const prevPlayer = prevPlayers.find(p => p.id === player.id);
         const prevSnake = prevPlayer?.snake || playerSnake;
 
-        // Client-side prediction for own snake
-        let renderSnake = [...playerSnake];
-        if (isMe && pendingDirectionRef.current && elapsed > SERVER_TICK * 0.6) {
-          // Predict next head position when waiting for server update
-          const predictedHead = predictSnakeHead(playerSnake, pendingDirectionRef.current);
-          if (predictedHead) {
-            renderSnake = [predictedHead, ...playerSnake.slice(0, -1)];
-          }
-        }
-
         // Draw snake segments with interpolation and skin effects
         const playerSkinType = player.skin || 'classic';
         const timestamp = Date.now();
 
-        renderSnake.forEach((segment, index) => {
+        playerSnake.forEach((segment, index) => {
           // Interpolate position if we have previous data
           let drawX = segment.x;
           let drawY = segment.y;
@@ -399,7 +361,7 @@ export default function Home() {
           }
 
           // Get skin style for this segment
-          const segmentStyle = getSegmentStyle(playerSkinType, pColor, index, renderSnake.length, timestamp);
+          const segmentStyle = getSegmentStyle(playerSkinType, pColor, index, playerSnake.length, timestamp);
 
           if (index === 0) {
             // Head with border (thicker for own snake)
@@ -443,7 +405,7 @@ export default function Home() {
         });
 
         // Draw name above head
-        const head = renderSnake[0];
+        const head = playerSnake[0];
         const prevHead = prevSnake[0] || head;
         let nameX = head.x;
         let nameY = head.y;
@@ -663,9 +625,6 @@ export default function Home() {
         lastUpdateTimeRef.current = Date.now();
         interpolationFactorRef.current = 0;
 
-        // Clear pending direction since server confirmed new state
-        pendingDirectionRef.current = null;
-
         setGameState(state);
 
         // Update direction ref from server state - use ref instead of state to avoid stale closure
@@ -737,7 +696,6 @@ export default function Home() {
     const opposites = { up: 'down', down: 'up', left: 'right', right: 'left' };
     if (directionRef.current !== opposites[newDir]) {
       directionRef.current = newDir;
-      pendingDirectionRef.current = newDir; // Store for client-side prediction
       socketRef.current.emit('direction', newDir);
     }
   };
