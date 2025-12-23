@@ -12,8 +12,8 @@ const PORT = process.env.PORT || 3001;
 const GRID_SIZE = 20;
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
-const TICK_RATE = 50; // ms - il server aggiorna ogni 50ms (20 FPS) - più fluido
-const SNAKE_SPEED = 2; // Serpente si muove ogni N tick (2 = 10 movimenti/sec, 3 = ~7 movimenti/sec)
+const TICK_RATE = 100; // ms - server tick ogni 100ms (10 FPS) - meno traffico di rete
+const SNAKE_SPEED = 1; // Serpente si muove ogni tick (10 movimenti/sec)
 
 // Middleware
 app.use(cors());
@@ -200,25 +200,16 @@ function respawnPlayer(player) {
 }
 
 // ==================== GAME LOOP ====================
-let tickCounter = 0;
-
 function gameTick() {
-  tickCounter++;
-
-  // Muovi serpenti solo ogni SNAKE_SPEED tick
-  if (tickCounter >= SNAKE_SPEED) {
-    tickCounter = 0;
-
-    // Muovi tutti i serpenti
-    for (const player of Object.values(gameState.players)) {
-      moveSnake(player);
-    }
-
-    // Controlla collisioni
-    checkCollisions();
+  // Muovi tutti i serpenti
+  for (const player of Object.values(gameState.players)) {
+    moveSnake(player);
   }
 
-  // Broadcast stato a tutti i client (sempre, per smooth rendering)
+  // Controlla collisioni
+  checkCollisions();
+
+  // Broadcast stato a tutti i client
   const state = {
     players: Object.values(gameState.players).map(p => ({
       id: p.id,

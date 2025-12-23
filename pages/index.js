@@ -309,7 +309,7 @@ export default function Home() {
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const SERVER_TICK = 50; // Must match server tick rate (20 FPS)
+    const SERVER_TICK = 100; // Must match server tick rate (10 FPS)
 
     const draw = () => {
       // Calculate interpolation factor (0 to 1)
