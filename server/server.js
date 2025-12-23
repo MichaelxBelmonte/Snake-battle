@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3001;
 const GRID_SIZE = 20;
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
-const TICK_RATE = 100; // ms - il server aggiorna ogni 100ms (10 FPS) - velocità bilanciata
+const TICK_RATE = 50; // ms - il server aggiorna ogni 50ms (20 FPS) - più fluido
 
 // Middleware
 app.use(cors());
@@ -134,39 +134,53 @@ function moveSnake(player) {
   }
 }
 
-// Controlla collisioni tra serpenti
+// Spatial hash per O(1) collision lookup
+function buildSpatialHash(players) {
+  const hash = new Map();
+  for (const player of players) {
+    if (!player.snake) continue;
+    for (let i = 0; i < player.snake.length; i++) {
+      const seg = player.snake[i];
+      const key = `${seg.x},${seg.y}`;
+      hash.set(key, { player, isHead: i === 0 });
+    }
+  }
+  return hash;
+}
+
+// Controlla collisioni tra serpenti - O(n) con spatial hash
 function checkCollisions() {
   const players = Object.values(gameState.players);
+  const spatialHash = buildSpatialHash(players);
+  const toRespawn = [];
 
   for (const player of players) {
     if (!player.snake || player.snake.length === 0) continue;
 
     const head = player.snake[0];
+    const headKey = `${head.x},${head.y}`;
 
-    // Collisione con se stesso
+    // Collisione con se stesso (controlla solo il corpo)
     for (let i = 1; i < player.snake.length; i++) {
       if (head.x === player.snake[i].x && head.y === player.snake[i].y) {
-        // Reset del serpente
-        respawnPlayer(player);
+        toRespawn.push({ player, killer: null });
         break;
       }
     }
 
-    // Collisione con altri serpenti
-    for (const other of players) {
-      if (other.id === player.id) continue;
-      if (!other.snake) continue;
+    // Collisione con altri serpenti - O(1) lookup
+    const collision = spatialHash.get(headKey);
+    if (collision && collision.player.id !== player.id) {
+      toRespawn.push({ player, killer: collision.player });
+    }
+  }
 
-      for (const segment of other.snake) {
-        if (head.x === segment.x && head.y === segment.y) {
-          // Il giocatore che collide muore
-          respawnPlayer(player);
-          // L'altro guadagna punti e una kill
-          other.score += 50;
-          other.kills = (other.kills || 0) + 1;
-          break;
-        }
-      }
+  // Processa tutti i respawn dopo il controllo
+  for (const { player, killer } of toRespawn) {
+    respawnPlayer(player);
+    if (killer) {
+      killer.score += 50;
+      killer.kills = (killer.kills || 0) + 1;
     }
   }
 }
