@@ -586,25 +586,29 @@ export default function Home() {
                   <span className="input-icon">👤</span>
                 </div>
 
-                <div className="color-group">
-                  <label className="color-label">Colore Snake</label>
-                  <div className="color-options">
-                    {['#4CAF50', '#2196F3', '#FF5722', '#9C27B0', '#FFEB3B', '#00BCD4', '#E91E63', '#FF9800'].map((color) => (
+                <div className="color-section">
+                  <div className="color-selected" style={{ backgroundColor: playerColor }}>
+                    <span className="color-check">✓</span>
+                  </div>
+                  <div className="color-picker-wrapper">
+                    {['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#eab308', '#06b6d4', '#ec4899', '#ef4444', '#8b5cf6', '#14b8a6'].map((color) => (
                       <button
                         key={color}
                         type="button"
-                        className={`color-btn ${playerColor === color ? 'selected' : ''}`}
-                        style={{ backgroundColor: color }}
+                        className={`color-dot ${playerColor === color ? 'active' : ''}`}
+                        style={{ '--dot-color': color }}
                         onClick={() => setPlayerColor(color)}
                       />
                     ))}
-                    <input
-                      type="color"
-                      value={playerColor}
-                      onChange={(e) => setPlayerColor(e.target.value)}
-                      className="color-custom"
-                      title="Colore personalizzato"
-                    />
+                    <label className="color-custom-wrapper">
+                      <input
+                        type="color"
+                        value={playerColor}
+                        onChange={(e) => setPlayerColor(e.target.value)}
+                        className="color-input-hidden"
+                      />
+                      <span className="color-custom-btn">+</span>
+                    </label>
                   </div>
                 </div>
 
@@ -969,59 +973,93 @@ export default function Home() {
           font-size: 1.2rem;
         }
 
-        /* Color Group */
-        .color-group {
+        /* Color Section - Modern Design */
+        .color-section {
           display: flex;
-          flex-direction: column;
-          gap: 10px;
+          align-items: center;
+          gap: 20px;
+          padding: 16px;
+          background: rgba(0, 0, 0, 0.2);
+          border-radius: 16px;
         }
 
-        .color-label {
-          font-size: 0.9rem;
-          color: rgba(255, 255, 255, 0.7);
+        .color-selected {
+          width: 50px;
+          height: 50px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+          transition: all 0.3s ease;
+          flex-shrink: 0;
         }
 
-        .color-options {
+        .color-check {
+          color: white;
+          font-size: 1.5rem;
+          text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        }
+
+        .color-picker-wrapper {
           display: flex;
           flex-wrap: wrap;
-          gap: 10px;
+          gap: 8px;
+          flex: 1;
         }
 
-        .color-btn {
-          width: 36px;
-          height: 36px;
+        .color-dot {
+          width: 28px;
+          height: 28px;
           border-radius: 50%;
-          border: 3px solid transparent;
+          border: none;
+          background: var(--dot-color);
           cursor: pointer;
+          transition: all 0.2s ease;
+          position: relative;
+        }
+
+        .color-dot:hover {
+          transform: scale(1.15);
+          box-shadow: 0 0 12px var(--dot-color);
+        }
+
+        .color-dot.active {
+          transform: scale(1.1);
+          box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9), 0 0 15px var(--dot-color);
+        }
+
+        .color-custom-wrapper {
+          position: relative;
+          cursor: pointer;
+        }
+
+        .color-input-hidden {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          opacity: 0;
+          cursor: pointer;
+        }
+
+        .color-custom-btn {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          border: 2px dashed rgba(255, 255, 255, 0.4);
+          background: rgba(255, 255, 255, 0.1);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1rem;
+          color: rgba(255, 255, 255, 0.6);
           transition: all 0.2s ease;
         }
 
-        .color-btn:hover {
-          transform: scale(1.1);
-        }
-
-        .color-btn.selected {
-          border-color: white;
-          box-shadow: 0 0 15px currentColor;
-        }
-
-        .color-custom {
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          border: 2px dashed rgba(255, 255, 255, 0.3);
-          cursor: pointer;
-          background: transparent;
-          padding: 0;
-        }
-
-        .color-custom::-webkit-color-swatch-wrapper {
-          padding: 2px;
-        }
-
-        .color-custom::-webkit-color-swatch {
-          border-radius: 50%;
-          border: none;
+        .color-custom-wrapper:hover .color-custom-btn {
+          border-color: rgba(255, 255, 255, 0.6);
+          color: white;
+          background: rgba(255, 255, 255, 0.15);
         }
 
         /* Play Button */
