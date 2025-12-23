@@ -557,6 +557,16 @@ export default function Home() {
       return;
     }
 
+    // Check if name is already taken in leaderboard
+    const nameTaken = leaderboard.some(
+      entry => entry.player_name.toLowerCase() === playerName.toLowerCase()
+    );
+
+    if (nameTaken) {
+      setError('Nome già in uso! Scegli un altro nome.');
+      return;
+    }
+
     if (isLoading) return;
 
     setError('');
@@ -794,7 +804,7 @@ export default function Home() {
                           key={color}
                           type="button"
                           className={`color-btn ${playerColor === color ? 'active' : ''}`}
-                          style={{ backgroundColor: color }}
+                          style={{ '--btn-color': color }}
                           onClick={() => setPlayerColor(color)}
                         />
                       ))}
@@ -1256,8 +1266,7 @@ export default function Home() {
           cursor: pointer;
           transition: all 0.2s ease;
           padding: 0;
-          appearance: none;
-          -webkit-appearance: none;
+          background: var(--btn-color);
         }
 
         .color-btn:hover {
